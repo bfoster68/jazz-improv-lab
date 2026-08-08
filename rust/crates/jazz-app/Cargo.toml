@@ -1,6 +1,6 @@
 [package]
 name = "jazz-app"
-description = "Native Bevy front end for the Jazz Improvisation Lab"
+description = "Native and web front end for the Jazz Improvisation Lab"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,3 +12,13 @@ jazz-audio  = { path = "../jazz-audio" }
 bevy = "0.19"
 bevy_egui = "0.41"
 cpal = "0.16"
+
+# Browser build: cpal talks to WebAudio, and panics go to the JS console.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+cpal = { version = "0.16", features = ["wasm-bindgen"] }
+console_error_panic_hook = "0.1"
+wasm-bindgen = "0.2"
+
+# wasm needs small, fast output; itch.io has an upload size limit.
+[package.metadata.wasm]
+opt-level = "z"

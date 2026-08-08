@@ -1,0 +1,1698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="description" content="Learn jazz improvisation on any instrument - theory, drills, ear training and a live play-along band.">
+<title>The Jazz Improvisation Lab — Learn to Solo on Any Instrument</title>
+<style>
+  :root{
+    --bg:#0f1216; --panel:#171b22; --panel2:#1e242e; --ink:#e8ecf1; --muted:#9aa6b4;
+    --line:#2a323d; --accent:#e0a63c; --accent2:#4bb3a7; --accent3:#c86b8a;
+    --good:#57c98a; --bad:#e06b6b; --chip:#232b36;
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{overscroll-behavior:contain;margin:0;padding:0}
+  body{
+    background:linear-gradient(180deg,#0d1014,#12161c 60%);
+    color:var(--ink); font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+    line-height:1.55; min-height:100vh;
+  }
+  header{
+    padding:26px 22px 18px; border-bottom:1px solid var(--line);
+    background:radial-gradient(1200px 200px at 20% -40%, rgba(224,166,60,.15), transparent);
+  }
+  h1{margin:0;font-size:26px;letter-spacing:.3px}
+  h1 .accent{color:var(--accent)}
+  .sub{color:var(--muted);margin-top:4px;font-size:14px}
+  nav{display:flex;gap:6px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line);
+      position:sticky;top:0;background:rgba(15,18,22,.92);backdrop-filter:blur(8px);z-index:20}
+  nav button{
+    background:var(--chip);color:var(--muted);border:1px solid var(--line);
+    padding:9px 15px;border-radius:999px;cursor:pointer;font-size:14px;font-weight:600;transition:.15s}
+  nav button:hover{color:var(--ink)}
+  nav button.active{background:var(--accent);color:#1a1206;border-color:var(--accent)}
+  main{max-width:960px;margin:0 auto;padding:22px 18px 90px}
+  .tab{display:none;animation:fade .25s ease}
+  .tab.active{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+        padding:18px 20px;margin:0 0 16px}
+  .card h2{margin:0 0 6px;font-size:20px}
+  .card h3{margin:18px 0 6px;font-size:16px;color:var(--accent)}
+  p{margin:8px 0}
+  .muted{color:var(--muted)}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  label.fld{font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
+  select,input[type=range]{accent-color:var(--accent)}
+  select{background:var(--panel2);color:var(--ink);border:1px solid var(--line);
+         border-radius:8px;padding:8px 10px;font-size:14px;max-width:100%}
+  label.fld{min-width:0;max-width:100%}
+  button.btn{background:var(--accent);color:#1a1206;border:none;border-radius:10px;
+             padding:10px 16px;font-weight:700;cursor:pointer;font-size:14px}
+  button.btn:hover{filter:brightness(1.08)}
+  button.btn.sec{background:var(--panel2);color:var(--ink);border:1px solid var(--line)}
+  button.btn.sec:hover{border-color:var(--accent)}
+  .pill{display:inline-block;background:var(--chip);border:1px solid var(--line);
+        border-radius:999px;padding:3px 10px;font-size:12px;color:var(--muted);margin:2px}
+  .notebtn{min-width:56px;text-align:center;background:var(--panel2);border:1px solid var(--line);
+    border-radius:10px;padding:10px 8px;cursor:pointer;transition:.12s;position:relative}
+  @media (hover:hover){ .notebtn:hover{border-color:var(--accent);transform:translateY(-2px)} }
+  .notebtn:focus-visible,.mname:focus-visible,nav button:focus-visible,.btn:focus-visible{
+    outline:2px solid var(--accent2); outline-offset:2px}
+  .notebtn .nm{font-size:17px;font-weight:700}
+  .notebtn .dg{font-size:11px;color:var(--accent2);margin-top:2px}
+  .noterow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .chordtones{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+  .ct{background:var(--chip);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:14px}
+  .ct b{color:var(--accent)}
+  .display{font-size:15px}
+  .big{font-size:40px;font-weight:800;letter-spacing:1px}
+  .kbd{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0c0f13;border:1px solid var(--line);
+       padding:1px 6px;border-radius:5px;font-size:13px;color:var(--accent2)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:640px){.grid2{grid-template-columns:1fr}}
+  .bars{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+  .bar{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 8px;
+       text-align:center;font-weight:700;transition:.1s}
+  .bar.now{background:var(--accent);color:#1a1206;border-color:var(--accent);box-shadow:0 0 0 3px rgba(224,166,60,.25)}
+  .bar.now::before{content:'▶ ';font-size:11px}
+  @media(max-width:640px){ .bars{grid-template-columns:repeat(2,1fr)!important} }
+  .bar small{display:block;font-weight:500;color:var(--muted);font-size:11px}
+  .bar.now small{color:#5a4413}
+  .feedback{min-height:26px;font-weight:700;margin-top:10px}
+  .feedback.good{color:var(--good)} .feedback.bad{color:var(--bad)}
+  .choices{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .choices button{background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+    padding:10px 14px;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600}
+  .choices button:hover{border-color:var(--accent)}
+  .choices button.correct{background:var(--good);color:#08120b;border-color:var(--good)}
+  .choices button.wrong{background:var(--bad);color:#160707;border-color:var(--bad)}
+  .stat{display:flex;gap:18px;margin-top:10px;color:var(--muted);font-size:14px}
+  .stat b{color:var(--ink)}
+  .learn h3{color:var(--accent)}
+  .learn p{color:#d3dae2}
+  .tag{font-size:12px;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;font-weight:700}
+  details{border:1px solid var(--line);border-radius:10px;padding:2px 14px;margin:8px 0;background:var(--panel2)}
+  summary{cursor:pointer;padding:10px 0;font-weight:700}
+  hr{border:none;border-top:1px solid var(--line);margin:14px 0}
+  .hint{background:rgba(75,179,167,.09);border-left:3px solid var(--accent2);padding:8px 12px;border-radius:6px;margin:10px 0;font-size:14px}
+  .foot{color:var(--muted);font-size:12px;text-align:center;padding:20px}
+  /* Real musical accidentals. Internally the app always uses ASCII b/# (the theory engine
+     depends on it); these glyphs are substituted at display time only. */
+  .acc{font-family:'Noto Music','Bravura Text','Leland Text','Petaluma Text','Segoe UI Symbol',
+       'Noto Sans Symbols 2','Apple Symbols','DejaVu Sans',serif;
+       font-style:normal;font-weight:500;font-size:1.12em;line-height:0;
+       letter-spacing:0;margin-left:.02em}
+  .acc.f{vertical-align:-.02em}
+  .acc.s{vertical-align:-.04em;font-size:1.02em}
+  .sfbar{display:flex;align-items:center;gap:10px;margin-left:auto;flex-wrap:wrap}
+  .sftoggle{display:flex;align-items:center;gap:7px;background:var(--chip);border:1px solid var(--line);
+    border-radius:999px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:600;color:var(--muted);
+    transition:.15s;user-select:none}
+  .sftoggle:hover{color:var(--ink);border-color:var(--accent2)}
+  .sftoggle input{accent-color:var(--accent2);cursor:pointer;margin:0}
+  .sftoggle.on{color:var(--accent2);border-color:var(--accent2);background:rgba(75,179,167,.12)}
+  .sfstatus{font-size:12px;color:var(--muted);min-width:0}
+  .sfstatus.err{color:var(--bad)} .sfstatus.ok{color:var(--good)}
+  @media(max-width:640px){ .sfbar{margin-left:0;width:100%} }
+</style>
+</head>
+<body>
+<header>
+  <h1>The <span class="accent">Jazz Improvisation</span> Lab</h1>
+  <div class="sub">Learn to solo on <em>any</em> instrument — beginner to advanced. Everything is note names, scale degrees, and sound. No fingerings, no fretboards.</div>
+</header>
+
+<nav id="nav">
+  <button data-tab="learn" class="active">📖 Learn</button>
+  <button data-tab="theory">🎼 Theory Lab</button>
+  <button data-tab="practice">🎯 Practice Drills</button>
+  <button data-tab="ear">👂 Ear Training</button>
+  <button data-tab="play">🎹 Play-Along</button>
+  <button data-tab="masters">🎺 Masters &amp; Standards</button>
+  <div class="sfbar">
+    <label class="sftoggle" title="Downloads real recorded piano, bass and vibraphone (about 8 MB) the first time. Needs an internet connection; falls back to the built-in synth.">
+      <input type="checkbox" id="sf-toggle">
+      <span>🎧 High-quality sounds</span>
+    </label>
+    <span id="sf-status" class="sfstatus" role="status" aria-live="polite"></span>
+  </div>
+</nav>
+
+<main>
+
+<!-- ===================== LEARN ===================== -->
+<section class="tab learn active" id="tab-learn">
+  <div class="card lvl-picker" style="background:transparent;border-style:dashed">
+    <div class="row" style="justify-content:space-between">
+      <div><span class="tag">Choose your level</span><div class="muted" style="font-size:14px">The whole app follows the same path — start where you are and climb.</div></div>
+      <div class="row" id="lvl-filter">
+        <button class="btn" data-lvl="beginner">Beginner</button>
+        <button class="btn sec" data-lvl="intermediate">Intermediate</button>
+        <button class="btn sec" data-lvl="advanced">Advanced</button>
+        <button class="btn sec" data-lvl="all">Show all</button>
+      </div>
+    </div>
+  </div>
+  <div class="card" data-level="beginner">
+    <div class="tag">Beginner · Start here</div>
+    <h2>What improvising really is</h2>
+    <p>Improvising is composing a melody in real time that (a) fits the chords going by and (b) sounds like a human speaking — with phrases, pauses, questions and answers. It is <em>not</em> running scales up and down. Scales are just the alphabet; music is the sentences you build.</p>
+    <p>Three things decide whether a note sounds good: the <b>note</b> (does it belong to or color the chord?), the <b>beat it lands on</b> (strong beats want stable notes), and the <b>rhythm and space</b> around it. Beginners obsess over the first and ignore the other two. Reverse that.</p>
+    <div class="hint">🔑 The single most useful habit: land a chord tone — ideally the <b>3rd or 7th</b> — on a strong beat, and leave space after your phrases.</div>
+  </div>
+
+  <div class="card">
+    <h2>The building blocks</h2>
+    <p>Number the notes of a major scale 1–7. In C that's C(1) D(2) E(3) F(4) G(5) A(6) B(7). Describing ideas as <b>numbers</b> makes them instantly transposable to any key and any instrument.</p>
+    <p>A seventh chord stacks 1·3·5·7 — the <b>chord tones</b>, your safe resting places. The <b>3rd and 7th are the "guide tones"</b>: the two notes that tell your ear what the chord is and where it wants to go. Notes above the 7th — the 9th, 11th, 13th and their alterations — are <b>color and tension</b> that want to resolve.</p>
+    <div class="grid2">
+      <div><span class="pill">Major 7 · 1 3 5 7</span> bright, at home <span class="muted">(Cmaj7 = C E G B)</span></div>
+      <div><span class="pill">Minor 7 · 1 b3 5 b7</span> mellow, in motion <span class="muted">(Dm7 = D F A C)</span></div>
+      <div><span class="pill">Dominant 7 · 1 3 5 b7</span> tense, resolving <span class="muted">(G7 = G B D F)</span></div>
+      <div><span class="pill">m7b5 · 1 b3 b5 b7</span> dark <span class="muted">(Bm7b5 = B D F A)</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>The ii–V–I: the sentence that unlocks jazz</h2>
+    <p>The most common progression in jazz, the backbone of hundreds of standards. In C major it is <b>Dm7 → G7 → Cmaj7</b> — setup → tension → resolution.</p>
+    <p>The trick that makes it sound like jazz for almost no effort is the <b>guide-tone line</b>: the 7th of each chord falls a half or whole step to the 3rd of the next. Over Dm7→G7→Cmaj7 two smooth lines run through: <span class="kbd">C → B → B</span> and <span class="kbd">F → F → E</span>. Just holding and resolving those two notes already sounds like a pro.</p>
+    <div class="hint">Try it now: open <b>Play-Along</b>, pick "ii–V–I in C", and play only those guide tones as long notes over the loop. Then decorate them.</div>
+  </div>
+
+  <div class="card">
+    <h2>Aim before you shoot: target notes &amp; enclosures</h2>
+    <p>Great players don't play "a scale over a chord." They <b>aim each phrase at a specific note that lands on a strong beat</b> — usually a chord tone, best of all the 3rd or 7th. The notes before it are just the approach.</p>
+    <p>The most characteristic approach is the <b>enclosure</b>: circle the target from above and below before landing. To hit E (the 3rd of Cmaj7) on beat 1, play F (a half step above) and Eb (a half step below) just before, then resolve to E. That squeeze-and-arrival is the most "bebop" sound you can learn.</p>
+  </div>
+
+  <div class="card">
+    <h2>Scales, chosen by chord quality</h2>
+    <p>Learn these five first. Always connect a scale to a chord, and practice targeting chord tones <em>within</em> it rather than running it straight.</p>
+    <details><summary>Major scale (Ionian) — over major 7 / the I chord</summary><p>C D E F G A B over Cmaj7. Bright, at home.</p></details>
+    <details><summary>Dorian — over minor 7 / the ii chord</summary><p>A major scale from its 2nd degree. D Dorian = D E F G A B C. Warm, not sad — your default minor sound.</p></details>
+    <details><summary>Mixolydian — over a relaxed dominant 7</summary><p>Major scale from its 5th. G Mixolydian = G A B C D E F.</p></details>
+    <details><summary>Minor pentatonic — five safe notes</summary><p>1 b3 4 5 b7. A minor pent = A C D E G. Hard to play a "wrong" note.</p></details>
+    <details><summary>Blues scale — pentatonic + the b5 "blue note"</summary><p>1 b3 4 b5 5 b7. A blues = A C D Eb E G. That b5 is the crying sound.</p></details>
+    <div class="hint">Don't ask "what scale?" first. Ask "what chord tone am I aiming at, on what beat?" — then use the scale to connect your targets. Explore any of these live in the <b>Theory Lab</b>.</div>
+  </div>
+
+  <div class="card">
+    <h2>Rhythm, swing &amp; space — the part that matters most</h2>
+    <p><b>Swing the eighth notes</b> (long–short, triplet lilt) at medium/slow tempos; they even out as tempo climbs. <b>Leave space</b> — play a phrase, then rest; silence is as musical as a note and is the #1 fix for beginners. <b>Phrase off the barline</b> — not every phrase starts on beat 1. And <b>converse</b>: make a statement, leave a gap, answer it.</p>
+  </div>
+
+  <div class="card">
+    <h2>Tension &amp; release, and the blues</h2>
+    <p>Every good phrase and whole solo is an arc of <b>tension and release</b>. Tension = higher register, denser rhythm, chromatic/"outside" notes, alterations. Release = chord tones, downbeats, thinner rhythm. Start simple, build intensity to a peak, then resolve. Make tension on purpose, then resolve it on purpose.</p>
+    <p>The <b>12-bar blues</b> is the best playground. A blues in F over three dominant chords (F7, Bb7, C7) lets you play one <b>blues scale</b> the whole way and sound good instantly — then add each chord's guide tones for the "jazz" layer. That blend of feel + harmony is jazz improvisation in miniature.</p>
+    <div class="hint">Open <b>Play-Along → 12-bar Blues in F</b> and try exactly this.</div>
+  </div>
+
+  <div class="card">
+    <h2>A practice routine that works</h2>
+    <p>Learning to improvise is learning a language: vocabulary, grammar, conversation.</p>
+    <p><b>1. Sing first</b> — if you can't hear it, you can't play it. <b>2. Small loops, slow, with a metronome.</b> <b>3. All twelve keys</b> (everything's stored as intervals). <b>4. Transcribe by ear</b> from records you love. <b>5. Play with tracks and people.</b> <b>6. Always keep your place in the form</b> — if lost, land a chord tone on a downbeat and you're anchored again.</p>
+  </div>
+
+  <!-- ============ INTERMEDIATE ============ -->
+  <div class="card" data-level="intermediate">
+    <div class="tag" style="color:var(--accent3)">Intermediate</div>
+    <h2>Extensions &amp; the "avoid" notes</h2>
+    <p>Now go above the 7th. The <b>9th, 11th, and 13th</b> are the sweet upper colors. But not every extension fits every chord: on a major or dominant chord the <b>natural 11 clashes</b> with the 3rd (it's a half step above), so it's an "avoid note" — use it only as a quick passing tone, or raise it to a <b>#11</b> for the bright Lydian sound. On minor 7 chords all of 9, 11, 13 are fair game (that's the Dorian sound).</p>
+    <div class="hint">Rule of thumb: play chord tones on strong beats, extensions on weak beats, and let any tension slide by step into the nearest chord tone.</div>
+  </div>
+
+  <div class="card" data-level="intermediate">
+    <div class="tag" style="color:var(--accent3)">Intermediate</div>
+    <h2>Bebop scales — keeping chord tones on the beat</h2>
+    <p>A plain 7-note scale has a problem at speed: run straight eighths and your chord tones drift onto the weak beats. The fix is the <b>bebop scale</b> — add one chromatic passing tone to make an 8-note scale so that, starting on a chord tone, every downbeat lands on a chord tone.</p>
+    <p>The <b>dominant bebop scale</b> adds a passing tone between the b7 and the root (G Mixolydian becomes G A B C D E F <b>F#</b> G). The <b>major bebop scale</b> adds a passing tone between the 5 and 6. This is the rhythmic secret behind classic bebop lines.</p>
+  </div>
+
+  <div class="card" data-level="intermediate">
+    <div class="tag" style="color:var(--accent3)">Intermediate</div>
+    <h2>Tritone substitution</h2>
+    <p>Any dominant 7 chord can be replaced by the dominant a <b>tritone away</b> — they share the same 3rd and 7th (the tension pair). So G7 (B/F) and Db7 (F/B) are interchangeable. Substituting <b>Db7 for G7</b> in a ii–V–I gives a smooth chromatic bass line (D → Db → C) and a hipper sound. Over the sub you can play its Lydian-dominant scale for extra color.</p>
+    <div class="hint">Try it live: <b>Practice Drills → Tritone substitution</b>, and <b>Play-Along → Tritone-sub turnaround</b>.</div>
+  </div>
+
+  <div class="card" data-level="intermediate">
+    <div class="tag" style="color:var(--accent3)">Intermediate</div>
+    <h2>Digital patterns &amp; 3-to-9 arpeggios</h2>
+    <p>Two workhorses for playing <em>through</em> the changes rather than just on them. The <b>1-2-3-5 digital pattern</b> outlines each chord melodically (over Dm7: D E F A). The <b>3-to-9 arpeggio</b> starts on the 3rd and stacks up (3-5-7-9), automatically catching the guide tones and one sweet extension (over Dm7: F A C E). Run either through a whole ii–V–I and you'll sound like you're spelling every chord.</p>
+  </div>
+
+  <!-- ============ ADVANCED ============ -->
+  <div class="card" data-level="advanced">
+    <div class="tag" style="color:var(--accent2)">Advanced</div>
+    <h2>Altered dominants &amp; upper-structure triads</h2>
+    <p>When a V7 resolves down a fifth, you can pile on tension with the <b>altered scale</b> (the 7th mode of melodic minor): it supplies b9, #9, #11 and b13 — every note that wants to pull into the I. <b>Upper-structure triads</b> are a clean way to grab a whole tension set in one familiar shape: a plain major triad played over the dominant's root. Over G7, a <b>Db major triad</b> (Db–F–Ab) gives the #11, b7 and b9 — every note of it sits inside the altered scale.</p>
+    <p>The same trick has a softer, <em>un</em>altered version. Over G7 an <b>A major triad</b> (A–C#–E) gives the 9, #11 and 13 — the bright <b>Lydian dominant</b> sound, which is what you want when a dominant is <em>not</em> resolving (like the D7 in &ldquo;Take the A Train&rdquo;). Its top note E is also the 3rd of Cmaj7, so it can be held straight through as a common tone.</p>
+    <div class="hint">Hear it: <b>Practice Drills → Upper-structure triad</b> and <b>→ Altered line over V7</b>.</div>
+  </div>
+
+  <div class="card" data-level="advanced">
+    <div class="tag" style="color:var(--accent2)">Advanced</div>
+    <h2>Reharmonization &amp; Coltrane changes</h2>
+    <p>Once you hear the changes, you can bend them. <b>Backdoor ii–V</b> (a bVII7 resolving up to I), <b>tritone subs</b>, and inserted secondary dominants all recolor a progression. The most famous advanced device is <b>Coltrane's major-third cycle</b> (the "Giant Steps" matrix): key centers moving by major thirds (e.g., C → Ab → E), each reached by its own V7. Practicing 1-2-3-5 cells cleanly through those fast-moving keys is a rite of passage.</p>
+    <div class="hint">Blow over it: <b>Play-Along → Coltrane cycle</b> and <b>→ Minor blues</b>.</div>
+  </div>
+
+  <div class="card" data-level="advanced">
+    <div class="tag" style="color:var(--accent2)">Advanced</div>
+    <h2>Playing outside: side-slipping &amp; superimposition</h2>
+    <p>Deliberate "wrong" notes, resolved on purpose. <b>Side-slipping</b> plays a phrase a half step away from the key and then snaps it back — pure tension and release. <b>Superimposition</b> lays a familiar shape from a different root over the chord: e.g., a <b>D major pentatonic over Cmaj7</b> yields 9, 3, #11, 13, 7 — a shimmering Lydian color — or an outside pentatonic over a V7 for altered tension. The rule that keeps it musical: <b>always resolve the outside idea back inside</b>, on a strong beat.</p>
+  </div>
+
+  <div class="card" data-level="advanced">
+    <div class="tag" style="color:var(--accent2)">Advanced</div>
+    <h2>Motivic development &amp; telling a story</h2>
+    <p>The difference between running vocabulary and <em>saying something</em>. Take a short <b>motif</b> — three or four notes with a distinctive rhythm — and develop it: transpose it to fit each chord, invert it, augment or shrink its rhythm, sequence it, displace it across the barline. A whole solo built from one evolving idea has shape and memorability that scale-running never will. This is where technique becomes music.</p>
+    <div class="hint">Practice it: <b>Practice Drills → Motivic development</b>.</div>
+  </div>
+
+  <div class="card" data-level="advanced">
+    <div class="tag" style="color:var(--accent2)">Advanced</div>
+    <h2>Rhythmic mastery: displacement &amp; playing over the barline</h2>
+    <p>At the highest level, rhythm is the frontier. <b>Metric displacement</b> repeats a phrase starting on a different beat so it floats against the pulse; <b>polyrhythmic groupings</b> (playing in 3s over 4/4) create rolling tension; <b>phrasing across the barline</b> and long, asymmetric lines make time feel elastic. Combine these with the harmonic tools above and you have the full language.</p>
+  </div>
+</section>
+
+<!-- ===================== THEORY LAB ===================== -->
+<section class="tab" id="tab-theory">
+  <div class="card">
+    <h2>Theory Lab</h2>
+    <p class="muted">Pick a root and a scale or chord. See the note names and their scale degrees, and hear it on any instrument's pitches. Click any note to play it.</p>
+    <div class="row" style="margin-top:12px">
+      <label class="fld">Root
+        <select id="th-root"></select>
+      </label>
+      <label class="fld">Type
+        <select id="th-type"></select>
+      </label>
+      <button class="btn" id="th-play">▶ Play ascending</button>
+      <button class="btn sec" id="th-chord">▶ Play as chord</button>
+    </div>
+    <div id="th-formula" class="muted" style="margin-top:12px"></div>
+    <div class="noterow" id="th-notes"></div>
+    <div id="th-tip" class="hint" style="margin-top:14px"></div>
+  </div>
+</section>
+
+<!-- ===================== PRACTICE DRILLS ===================== -->
+<section class="tab" id="tab-practice">
+  <div class="card">
+    <h2>Practice Drills</h2>
+    <p class="muted">Generated, instrument-agnostic exercises. Pick a drill and a key; the app shows the notes and degrees and plays a model so you can echo it by ear, then transpose it to every key.</p>
+    <div class="row" style="margin-top:12px">
+      <label class="fld">Drill
+        <select id="dr-type">
+          <optgroup label="Beginner">
+            <option value="guidetone">Guide-tone line over ii–V–I</option>
+            <option value="enclosure">Enclosure into a target chord tone</option>
+            <option value="251lick">A ii–V–I lick (bebop vocabulary)</option>
+            <option value="scaleseq">Scale sequence in 3rds</option>
+            <option value="pentpattern">Pentatonic 4-note pattern</option>
+          </optgroup>
+          <optgroup label="Intermediate">
+            <option value="digital">1-2-3-5 digital pattern through ii–V–I</option>
+            <option value="39arp">3-to-9 arpeggios over ii–V–I</option>
+            <option value="bebop">Dominant bebop scale (chord tones on the beat)</option>
+            <option value="tritonesub">Tritone substitution on the V</option>
+          </optgroup>
+          <optgroup label="Advanced">
+            <option value="upperstructure">Upper-structure triad over V7 (9 #11 13)</option>
+            <option value="altered">Altered scale line over V7</option>
+            <option value="pentsuper">Pentatonic superimposition (Lydian color)</option>
+            <option value="coltrane">Coltrane major-3rd cycle (1-2-3-5)</option>
+            <option value="motif">Motivic development through ii–V–I</option>
+          </optgroup>
+        </select>
+      </label>
+      <label class="fld">Key
+        <select id="dr-key"></select>
+      </label>
+      <button class="btn" id="dr-new">↻ Generate</button>
+      <button class="btn sec" id="dr-play">▶ Play it</button>
+    </div>
+    <div id="dr-concept" style="margin-top:14px"></div>
+    <div class="bars" id="dr-bars" style="grid-template-columns:repeat(3,1fr)"></div>
+    <div class="noterow" id="dr-notes"></div>
+    <div id="dr-how" class="hint" style="margin-top:14px"></div>
+  </div>
+</section>
+
+<!-- ===================== EAR TRAINING ===================== -->
+<section class="tab" id="tab-ear">
+  <div class="card">
+    <h2>Ear Training</h2>
+    <p class="muted">The most important jazz skill. Listen, then choose. Everything plays through the built-in synth, so it works for any instrument.</p>
+    <div class="row" style="margin-top:12px">
+      <label class="fld">Mode
+        <select id="ear-mode">
+          <optgroup label="Beginner">
+            <option value="interval">Intervals</option>
+            <option value="chord">Chord qualities (basic)</option>
+          </optgroup>
+          <optgroup label="Intermediate / Advanced">
+            <option value="extended">Extended &amp; altered chords</option>
+            <option value="progression">Progressions (ii–V–I &amp; friends)</option>
+          </optgroup>
+        </select>
+      </label>
+      <button class="btn" id="ear-new">🎲 New question</button>
+      <button class="btn sec" id="ear-replay">🔁 Replay</button>
+    </div>
+    <div class="feedback" id="ear-feedback" aria-live="polite" role="status"></div>
+    <div class="choices" id="ear-choices"></div>
+    <div class="stat">Score: <b id="ear-score">0</b> &nbsp;·&nbsp; Streak: <b id="ear-streak">0</b> &nbsp;·&nbsp; Asked: <b id="ear-total">0</b></div>
+    <div class="hint" style="margin-top:14px">Tip: sing the sound back before you answer. Naming comes <em>after</em> hearing.</div>
+  </div>
+</section>
+
+<!-- ===================== PLAY-ALONG ===================== -->
+<section class="tab" id="tab-play">
+  <div class="card">
+    <h2>Play-Along Engine</h2>
+    <p class="muted">A live rhythm section — walking bass, comping chords, and brushed drums — generated in your browser. The comping rhythm, bass line, and drum accents <b>change every bar</b> (with anticipations, off-beats, dropped "bombs," occasional two-feel bars, and turnaround fills) so it never loops mechanically. Solo over it on your instrument; the current chord, its chord tones, and a suggested scale are always shown so you know what to aim at.</p>
+    <div class="row" style="margin-top:12px">
+      <label class="fld">Progression
+        <select id="pa-prog">
+          <optgroup label="Beginner">
+            <option value="251C">ii–V–I in C major</option>
+            <option value="251minC">ii–V–i in C minor</option>
+            <option value="bluesF">12-bar Blues in F</option>
+            <option value="dorianD">Modal vamp — D Dorian (just blow)</option>
+          </optgroup>
+          <optgroup label="Intermediate">
+            <option value="autumn">Autumn Leaves (A section)</option>
+            <option value="ttsub">Tritone-sub turnaround</option>
+            <option value="cycle">ii–V–I moving through keys</option>
+          </optgroup>
+          <optgroup label="Advanced">
+            <option value="minorblues">Minor blues in C</option>
+            <option value="coltrane">Coltrane cycle (major thirds)</option>
+          </optgroup>
+          <optgroup label="Jazz Standards">
+            <option value="sowhat">So What — full AABA · modal (Miles / Coltrane)</option>
+            <option value="bluebossa">Blue Bossa (Kenny Dorham)</option>
+            <option value="atrain">Take the A Train (Billy Strayhorn)</option>
+            <option value="rhythmA">Rhythm Changes A — Bb (Parker / Dizzy)</option>
+            <option value="rhythmFull">Rhythm Changes — full AABA — Bb</option>
+          </optgroup>
+        </select>
+      </label>
+      <label class="fld">Tempo <span id="pa-tempolabel" class="muted">120 bpm</span>
+        <input type="range" id="pa-tempo" min="50" max="240" value="120" style="width:160px">
+      </label>
+      <label class="fld">Swing
+        <select id="pa-swing"><option value="1">On</option><option value="0">Off (straight)</option></select>
+      </label>
+      <label class="fld">Comping
+        <select id="pa-density"><option value="medium">Medium</option><option value="sparse">Sparse</option><option value="busy">Busy</option></select>
+      </label>
+      <label class="fld">Band volume
+        <input type="range" id="pa-vol" min="0" max="150" value="100" style="width:130px">
+      </label>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button class="btn" id="pa-toggle">▶ Play</button>
+      <label class="fld">Bass <input type="checkbox" id="pa-bass" checked></label>
+      <label class="fld">Chords <input type="checkbox" id="pa-chords" checked></label>
+      <label class="fld">Drums <input type="checkbox" id="pa-drums" checked></label>
+    </div>
+    <div class="bars" id="pa-bars"></div>
+    <div class="card" style="background:var(--panel2);margin-top:16px">
+      <div class="row" style="justify-content:space-between">
+        <div><span class="tag">Now playing</span> <span class="muted" id="pa-formpos" style="font-size:13px"></span><div class="big" id="pa-chordnow">—</div></div>
+        <div style="text-align:right">
+          <div class="muted">Aim at these chord tones</div>
+          <div class="chordtones" id="pa-tones" style="justify-content:flex-end"></div>
+        </div>
+      </div>
+      <hr>
+      <div class="display"><b>Suggested scale:</b> <span id="pa-scale">—</span></div>
+      <div class="noterow" id="pa-scalenotes"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== MASTERS & STANDARDS ===================== -->
+<section class="tab" id="tab-masters">
+  <div class="card">
+    <h2>Masters to Study</h2>
+    <p class="muted">The language is learned by ear. Live with these giants — sing along, then transcribe a phrase. Below: who they are, their instrument, and what to listen for in their improvising. Click a name to hear a phrase in that instrument's register.</p>
+    <div id="masters-list"></div>
+  </div>
+  <div class="card">
+    <h2>Essential Standards</h2>
+    <p class="muted">A starter repertoire. Learn the melody and the changes, then improvise over them. The <b>▶ Play</b> button loads that tune's changes straight into the Play-Along engine so you can solo right now.</p>
+    <div id="standards-list"></div>
+  </div>
+</section>
+
+</main>
+<div class="foot">The Jazz Improvisation Lab · everything expressed as notes, degrees &amp; sound so it works on any instrument · practice slowly, sing first, leave space.</div>
+
+<script>
+/* =========================================================================
+   AUDIO ENGINE  (Web Audio — works on any device, no samples needed)
+   ========================================================================= */
+/*  Instruments are synthesized rather than sampled, so the app stays a single
+    offline file. Each voice models the real thing:
+      keys  — FM electric piano (Rhodes): a bell-like attack index that decays
+              into a pure sine body, which is what makes a Rhodes sound warm.
+      bass  — upright: filtered saw/triangle with a pitch drop and a finger
+              transient at the front, plus a fast filter envelope.
+      vibes — struck metal bar: sine partials with a slow tremolo.
+      ride  — six inharmonic square partials (a real cymbal is not harmonic),
+              split into a bright "ting" and a longer wash.
+    Everything runs through a shared reverb send so the band sits in a room. */
+let AC=null, MASTER=null, COMP=null, NOISE=null, REV=null, REVSEND=null;
+function makeIR(ctx, seconds, decay){
+  const rate=ctx.sampleRate, len=Math.floor(rate*seconds);
+  const buf=ctx.createBuffer(2,len,rate);
+  for(let ch=0; ch<2; ch++){
+    const d=buf.getChannelData(ch);
+    for(let i=0;i<len;i++){
+      const t=i/len;
+      // early diffusion + exponential tail; slight L/R decorrelation for width
+      d[i]=(Math.random()*2-1)*Math.pow(1-t,decay)*(i<rate*0.01?t*100:1);
+    }
+  }
+  return buf;
+}
+function ac(){
+  if(!AC){
+    AC = new (window.AudioContext||window.webkitAudioContext)();
+    MASTER = AC.createGain(); MASTER.gain.value=1;
+    COMP = AC.createDynamicsCompressor();
+    COMP.threshold.value=-16; COMP.knee.value=22; COMP.ratio.value=3;
+    COMP.attack.value=0.006; COMP.release.value=0.22;
+    const outGain=AC.createGain(); outGain.gain.value=0.85;
+    MASTER.connect(COMP); COMP.connect(outGain); outGain.connect(AC.destination);
+    try{
+      REV=AC.createConvolver(); REV.buffer=makeIR(AC,1.7,2.6);
+      REVSEND=AC.createGain(); REVSEND.gain.value=1;
+      const revRet=AC.createGain(); revRet.gain.value=0.30;
+      const revTone=AC.createBiquadFilter(); revTone.type='highpass'; revTone.frequency.value=380;
+      REVSEND.connect(REV); REV.connect(revTone); revTone.connect(revRet); revRet.connect(COMP);
+    }catch(e){ REV=null; REVSEND=null; }   // reverb is a bonus, never a requirement
+  }
+  if(AC.state==='suspended') AC.resume().catch(()=>{});
+  return AC;
+}
+function out(){ ac(); return MASTER; }
+// Route a voice to the dry bus and (optionally) the shared reverb.
+function sendTo(node, wet){
+  node.connect(out());
+  if(REVSEND && wet>0){ const s=AC.createGain(); s.gain.value=wet; node.connect(s); s.connect(REVSEND); }
+}
+function noiseBuf(){
+  const ctx=ac();
+  if(!NOISE){
+    const n=Math.floor(ctx.sampleRate*2);
+    NOISE=ctx.createBuffer(1,n,ctx.sampleRate);
+    const d=NOISE.getChannelData(0);
+    for(let i=0;i<n;i++) d[i]=Math.random()*2-1;
+  }
+  return NOISE;
+}
+function midiToFreq(m){ return 440*Math.pow(2,(m-69)/12); }
+
+/* ---------- FM electric piano (comping + general keys) ---------- */
+function voiceKeys(f, t, dur, peak, wet){
+  const ctx=AC;
+  const car=ctx.createOscillator(); car.type='sine'; car.frequency.value=f;
+  const mod=ctx.createOscillator(); mod.type='sine'; mod.frequency.value=f*2; // 2:1 = tine-like
+  const modG=ctx.createGain();
+  const idx=f*2.4;                                   // bell attack, decaying fast
+  modG.gain.setValueAtTime(idx,t);
+  modG.gain.exponentialRampToValueAtTime(Math.max(1,idx*0.02), t+0.28);
+  mod.connect(modG); modG.connect(car.frequency);
+  const g=ctx.createGain();
+  const tone=ctx.createBiquadFilter(); tone.type='lowpass';
+  tone.frequency.setValueAtTime(4200,t); tone.frequency.exponentialRampToValueAtTime(1500,t+dur+0.3);
+  g.gain.setValueAtTime(0.0001,t);
+  g.gain.exponentialRampToValueAtTime(peak, t+0.012);      // fast but not clicky
+  g.gain.exponentialRampToValueAtTime(peak*0.32, t+Math.max(0.18,dur*0.55));
+  g.gain.exponentialRampToValueAtTime(0.0001, t+dur+0.55);
+  car.connect(tone); tone.connect(g); sendTo(g,wet);
+  car.start(t); mod.start(t);
+  car.stop(t+dur+0.65); mod.stop(t+dur+0.65);
+}
+/* ---------- Upright bass ---------- */
+function voiceBass(f, t, dur, peak, wet){
+  const ctx=AC;
+  const o=ctx.createOscillator(); o.type='sawtooth';
+  o.frequency.setValueAtTime(f*1.045,t);                  // slight pitch drop = finger pull
+  o.frequency.exponentialRampToValueAtTime(f, t+0.055);
+  const sub=ctx.createOscillator(); sub.type='sine'; sub.frequency.value=f;
+  const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.Q.value=7;
+  lp.frequency.setValueAtTime(1500,t);                    // woody attack, closing quickly
+  lp.frequency.exponentialRampToValueAtTime(320, t+0.22);
+  const g=ctx.createGain();
+  g.gain.setValueAtTime(0.0001,t);
+  g.gain.exponentialRampToValueAtTime(peak, t+0.014);
+  g.gain.exponentialRampToValueAtTime(peak*0.5, t+Math.min(0.3,dur*0.6));
+  g.gain.exponentialRampToValueAtTime(0.0001, t+dur+0.18);
+  const subG=ctx.createGain(); subG.gain.value=0.55;
+  o.connect(lp); lp.connect(g); sub.connect(subG); subG.connect(g);
+  sendTo(g, wet);
+  // finger/string transient
+  const nz=ctx.createBufferSource(); nz.buffer=noiseBuf(); nz.loop=true;
+  const nf=ctx.createBiquadFilter(); nf.type='bandpass'; nf.frequency.value=2200; nf.Q.value=1.2;
+  const ng=ctx.createGain(); ng.gain.setValueAtTime(peak*0.35,t);
+  ng.gain.exponentialRampToValueAtTime(0.0001,t+0.05);
+  nz.connect(nf); nf.connect(ng); ng.connect(out());
+  nz.start(t, Math.random()*1.5, 0.06); nz.stop(t+0.07);
+  o.start(t); sub.start(t); o.stop(t+dur+0.25); sub.stop(t+dur+0.25);
+}
+/* ---------- Vibraphone (drills, theory lab, ear training) ---------- */
+function voiceVibes(f, t, dur, peak, wet){
+  const ctx=AC;
+  const g=ctx.createGain();
+  g.gain.setValueAtTime(0.0001,t);
+  g.gain.exponentialRampToValueAtTime(peak, t+0.006);
+  g.gain.exponentialRampToValueAtTime(0.0001, t+dur+0.9);
+  // metal bar partials: fundamental + 4th harmonic + 10th (struck-bar series)
+  [[1,1],[4,0.30],[9.2,0.12]].forEach(([mult,amp])=>{
+    const o=ctx.createOscillator(); o.type='sine'; o.frequency.value=f*mult;
+    const og=ctx.createGain(); og.gain.value=amp;
+    o.connect(og); og.connect(g); o.start(t); o.stop(t+dur+1.0);
+  });
+  const trem=ctx.createOscillator(); trem.type='sine'; trem.frequency.value=4.4;
+  const tremG=ctx.createGain(); tremG.gain.value=0.16;
+  const vca=ctx.createGain(); vca.gain.value=1;
+  trem.connect(tremG); tremG.connect(vca.gain);
+  g.connect(vca); sendTo(vca, wet);
+  trem.start(t); trem.stop(t+dur+1.0);
+}
+/* =========================================================================
+   OPTIONAL HIGH-QUALITY SAMPLES
+   Real recorded instruments (FluidR3 GM) fetched on demand. Entirely optional:
+   if the network is unavailable or the download fails we stay on the synth, so
+   the app still works offline as a single file.
+   ========================================================================= */
+const SF = { on:false, ready:false, loading:false, failed:false, buf:{keys:{},bass:{},vibes:{}}, norm:{} };
+const SF_DEF = {              // only the registers each instrument actually plays, to cut the download
+  keys : {name:'acoustic_grand_piano', lo:52, hi:88},
+  bass : {name:'acoustic_bass',        lo:28, hi:60},
+  vibes: {name:'vibraphone',           lo:50, hi:93}
+};
+const SF_HOSTS = [
+  'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/',
+  'https://cdn.jsdelivr.net/gh/gleitz/midi-js-soundfonts@gh-pages/FluidR3_GM/'
+];
+const SF_PC={C:0,D:2,E:4,F:5,G:7,A:9,B:11};
+function sfNameToMidi(s){
+  const m=/^([A-G])([#b]?)(-?\d+)$/.exec(s); if(!m) return null;
+  const pc=SF_PC[m[1]] + (m[2]==='#'?1:(m[2]==='b'?-1:0));
+  return (parseInt(m[3],10)+1)*12 + pc;
+}
+function sfStatus(msg, cls){
+  const el=document.getElementById('sf-status');
+  if(el){ el.textContent=msg||''; el.className='sfstatus'+(cls?' '+cls:''); }
+}
+function loadScript(url, timeoutMs){
+  return new Promise((resolve,reject)=>{
+    const s=document.createElement('script');
+    const done=(ok)=>{ clearTimeout(tm); s.onload=s.onerror=null; ok?resolve():reject(new Error('load failed')); };
+    const tm=setTimeout(()=>{ s.remove(); done(false); }, timeoutMs||12000);
+    s.onload=()=>done(true); s.onerror=()=>done(false);
+    s.src=url; document.head.appendChild(s);
+  });
+}
+async function sfLoadInstrument(key, onProgress){
+  if(navigator.onLine===false) throw new Error('offline');
+  const def=SF_DEF[key];
+  let table=(window.MIDI&&MIDI.Soundfont&&MIDI.Soundfont[def.name])||null;
+  if(!table){
+    let lastErr=null;
+    for(const host of SF_HOSTS){
+      try{ await loadScript(host+def.name+'-mp3.js');
+           table=(window.MIDI&&MIDI.Soundfont&&MIDI.Soundfont[def.name])||null;
+           if(table) break; }
+      catch(e){ lastErr=e; }
+    }
+    if(!table) throw lastErr||new Error('soundfont unavailable');
+  }
+  const ctx=ac();
+  const entries=Object.keys(table).map(n=>[sfNameToMidi(n), table[n]])
+    .filter(([m])=> m!=null && m>=def.lo && m<=def.hi);
+  let done=0;
+  await Promise.all(entries.map(async ([midi,uri])=>{
+    try{
+      const arr=await (await fetch(uri)).arrayBuffer();
+      const decoded=await new Promise((res,rej)=>{
+        const p=ctx.decodeAudioData(arr,res,rej);      // callback form for older Safari
+        if(p&&p.then) p.then(res,rej);
+      });
+      SF.buf[key][midi]=decoded;
+      if(done<6){                                     // sample a few notes to gauge the bank's level
+        const d=decoded.getChannelData(0); let mx=0;
+        for(let i=0;i<d.length;i+=64){ const a=Math.abs(d[i]); if(a>mx) mx=a; }
+        SF.norm[key]=Math.max(SF.norm[key]||0, mx);
+      }
+    }catch(e){ /* skip a bad note rather than failing the whole instrument */ }
+    done++; if(onProgress) onProgress(done, entries.length);
+  }));
+  if(!Object.keys(SF.buf[key]).length) throw new Error('no notes decoded');
+}
+async function sfEnable(){
+  if(SF.loading) return;
+  SF.loading=true; SF.failed=false;
+  sfStatus('Downloading instruments…');
+  const keys=Object.keys(SF_DEF); let idx=0;
+  try{
+    for(const k of keys){
+      idx++;
+      await sfLoadInstrument(k,(d,total)=>{
+        sfStatus('Loading '+SF_DEF[k].name.replace(/_/g,' ')+' — '+Math.round(d/total*100)+'% ('+idx+'/'+keys.length+')');
+      });
+    }
+    SF.ready=true; SF.on=true;
+    sfStatus('High-quality sounds on', 'ok');
+    setTimeout(()=>{ if(SF.on&&SF.ready) sfStatus('Real piano, bass & vibes (drums stay synth)','ok'); },1600);
+  }catch(e){
+    SF.ready=false; SF.on=false; SF.failed=true;
+    const cb=document.getElementById('sf-toggle'); if(cb) cb.checked=false;
+    document.querySelector('.sftoggle').classList.remove('on');
+    sfStatus(navigator.onLine===false
+      ? 'Offline — using built-in sounds'
+      : 'Couldn’t download — using built-in sounds', 'err');
+  }finally{ SF.loading=false; }
+}
+// Play a recorded note; falls back to null if this pitch isn't loaded.
+function playSample(kind, midi, t, dur, peak, wet){
+  const bank=SF.buf[kind]; if(!bank) return false;
+  let src=bank[midi], rate=1;
+  if(!src){                                   // nearest loaded pitch, transposed
+    let best=null, bd=99;
+    for(const k in bank){ const d=Math.abs(k-midi); if(d<bd){ bd=d; best=+k; } }
+    if(best==null || bd>6) return false;
+    src=bank[best]; rate=Math.pow(2,(midi-best)/12);
+  }
+  const ctx=AC;
+  const node=ctx.createBufferSource(); node.buffer=src; node.playbackRate.value=rate;
+  const g=ctx.createGain();
+  const rel=(kind==='bass')?0.18:0.55;
+  // Auto-level: scale to the measured loudness of this sample bank so swapping engines
+  // doesn't change the mix, whatever level the samples happen to be mastered at.
+  const lvl=Math.max(0.0002, peak*2.2/(SF.norm[kind]||1));
+  g.gain.setValueAtTime(0.0001,t);
+  g.gain.exponentialRampToValueAtTime(lvl, t+0.006);
+  g.gain.setValueAtTime(lvl, t+Math.max(0.03,dur*0.75));
+  g.gain.exponentialRampToValueAtTime(0.0001, t+dur+rel);
+  node.connect(g); sendTo(g, wet);
+  node.start(t); node.stop(t+dur+rel+0.05);
+  return true;
+}
+
+/* Public voice API — `voice` picks the instrument, everything else is trim. */
+function playTone(midi, when, dur, opts){
+  opts=opts||{}; const ctx=ac();
+  const t=(when!=null?when:ctx.currentTime);
+  const f=midiToFreq(midi);
+  const peak=opts.gain!=null?opts.gain:0.18;
+  const wet=opts.wet!=null?opts.wet:0.16;
+  const v=opts.voice || (opts.cutoff && opts.cutoff<1000 ? 'bass' : 'vibes');
+  const bassWet=opts.wet!=null?opts.wet:0.07;
+  if(SF.on && SF.ready && playSample(v, midi, t, dur, peak, v==='bass'?bassWet:wet)) return;
+  if(v==='bass') voiceBass(f,t,dur,peak,bassWet);
+  else if(v==='keys') voiceKeys(f,t,dur,peak,wet);
+  else voiceVibes(f,t,dur,peak,wet);
+}
+function playChordTones(midis, when, dur, opts){
+  opts=opts||{};
+  const g=opts.gain!=null?opts.gain:0.075;
+  midis.forEach((m,i)=> playTone(m, when, dur, Object.assign({},opts,{
+    voice:opts.voice||'keys', gain:g*(i===0?1:0.92), wet:opts.wet!=null?opts.wet:0.22 })) );
+}
+/* ---------- Percussion ---------- */
+function noiseBurst(when, dur, opts){
+  const ctx=ac(); opts=opts||{};
+  const src=ctx.createBufferSource(); src.buffer=noiseBuf(); src.loop=true;
+  const offset=Math.random()*1.5;
+  const bp=ctx.createBiquadFilter(); bp.type=opts.type||'highpass'; bp.frequency.value=opts.freq||8000;
+  if(opts.Q) bp.Q.value=opts.Q;
+  const g=ctx.createGain(); const peak=opts.gain||0.05;
+  g.gain.setValueAtTime(0.0001,when);
+  g.gain.exponentialRampToValueAtTime(peak, when+(opts.attack||0.004));
+  g.gain.exponentialRampToValueAtTime(0.0001, when+dur);
+  src.connect(bp); bp.connect(g); sendTo(g, opts.wet!=null?opts.wet:0.12);
+  src.start(when, Math.max(0,offset), dur+0.03); src.stop(when+dur+0.03);
+}
+// A real ride cymbal is inharmonic — six squares beating against each other.
+const RIDE_RATIOS=[1,1.4471,1.6170,1.9265,2.5028,2.6637];
+function rideHit(when, opts){
+  const ctx=ac(); opts=opts||{};
+  const base=opts.base||286, peak=opts.gain||0.03, decay=opts.decay||0.9;
+  const bp=ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=opts.body||3400; bp.Q.value=0.7;
+  const hp=ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=5200;
+  const gBody=ctx.createGain(), gTing=ctx.createGain();
+  gBody.gain.setValueAtTime(peak*0.55,when); gBody.gain.exponentialRampToValueAtTime(0.0001,when+decay);
+  gTing.gain.setValueAtTime(peak,when);      gTing.gain.exponentialRampToValueAtTime(0.0001,when+0.13);
+  const mix=ctx.createGain();
+  RIDE_RATIOS.forEach(r=>{ const o=ctx.createOscillator(); o.type='square';
+    o.frequency.value=base*r; o.connect(mix); o.start(when); o.stop(when+decay+0.05); });
+  mix.connect(bp); bp.connect(gBody); sendTo(gBody,0.22);
+  mix.connect(hp); hp.connect(gTing); sendTo(gTing,0.18);
+}
+function kick(when){ const ctx=ac(); const o=ctx.createOscillator(); const g=ctx.createGain();
+  o.type='sine';
+  o.frequency.setValueAtTime(115,when); o.frequency.exponentialRampToValueAtTime(42,when+0.11);
+  g.gain.setValueAtTime(0.0001,when); g.gain.exponentialRampToValueAtTime(0.17,when+0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001,when+0.20);
+  o.connect(g); sendTo(g,0.05); o.start(when); o.stop(when+0.24); }
+
+/* =========================================================================
+   MUSIC THEORY CORE
+   ========================================================================= */
+const NOTE_NAMES = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+// nicer spelling for common sharp keys
+const SHARP_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+function pcName(pc, useSharp){ pc=((pc%12)+12)%12; return (useSharp?SHARP_NAMES:NOTE_NAMES)[pc]; }
+
+// degree label for a semitone interval above the root
+const DEGREE = {0:'1',1:'b9',2:'9',3:'b3',4:'3',5:'11',6:'#11',7:'5',8:'b13',9:'13',10:'b7',11:'7'};
+const DEGREE_SCALE = {0:'1',1:'b2',2:'2',3:'b3',4:'3',5:'4',6:'b5',7:'5',8:'b6',9:'6',10:'b7',11:'7'};
+function degName(semi, scaleStyle){ return (scaleStyle?DEGREE_SCALE:DEGREE)[((semi%12)+12)%12]; }
+
+/* ---- Proper note spelling: letter arithmetic, so a #11 is C# and never Db ---- */
+const LETTERS=['C','D','E','F','G','A','B'];
+const LETTER_PC={C:0,D:2,E:4,F:5,G:7,A:9,B:11};
+function accStr(n){ return n===0?'':(n>0?'#'.repeat(n):'b'.repeat(-n)); }
+function diatonicOf(deg){
+  const m=String(deg).match(/(\d+)/); if(!m) return null;
+  let n=parseInt(m[1],10); if(n>7) n=((n-1)%7)+1; return n;
+}
+// Spell pitch-class `pc` as the given degree above a root spelled `rootName` (e.g. "G","Eb").
+function spellDeg(rootName, deg, pc){
+  const dn=diatonicOf(deg); if(!dn||!rootName) return null;
+  const ri=LETTERS.indexOf(rootName[0]); if(ri<0) return null;
+  const letter=LETTERS[(ri+dn-1)%7];
+  let acc=(((pc-LETTER_PC[letter])%12)+12)%12; if(acc>6) acc-=12;
+  // Single accidentals only: a beginner reading "Bbb" or "C##" learns nothing, so in those
+  // rare cases we fall back to the plain enharmonic name.
+  if(Math.abs(acc)>1) return null;
+  return letter+accStr(acc);
+}
+// Best-effort name: spell relative to a root when we know the degree, else use the key preference.
+function noteName(pc, deg, rootName, useSharp){
+  return (deg&&rootName? spellDeg(rootName,deg,((pc%12)+12)%12) : null) || pcName(pc,useSharp);
+}
+/* ---- Musical accidental rendering ----
+   Converts the ASCII notation the engine uses (Bb, F#, b3, #11, Dm7b5) into real
+   musical glyphs for display. Nothing upstream changes: spellDeg, comparisons and
+   all the theory logic keep working on plain ASCII. */
+const ACC_GLYPH={'b':'\u266D','bb':'\u266D\u266D','#':'\u266F','##':'\u266F\u266F','n':'\u266E'};
+function accSpan(a){
+  const cls = a.charAt(0)==='b' ? 'f' : 's';
+  return '<span class="acc '+cls+'">'+ACC_GLYPH[a]+'</span>';
+}
+function escHTML(t){ return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+// A note letter followed by an accidental: Bb, F#, Ebm7, Abmaj7, Db7 …
+const RE_NOTE=/([A-G])(bb|b|##|#)(?=$|[\s,.;:!?)\]\/\-\u2013\u2014]|maj|min|dim|aug|sus|add|m(?![a-z])|\d)/g;
+// An accidental in front of a scale degree: b3, #11, b13, m7b5 …
+const RE_DEG=/(^|[^A-Za-z\u266D\u266F])(bb|b|##|#)(\d{1,2})(?![A-Za-z])/g;
+// Accidentals already written as Unicode elsewhere in the page
+const RE_UNI=/([\u266D\u266E\u266F])/g;
+function fmtMusic(text){
+  let h=escHTML(text);
+  if(!/[b#\u266D\u266E\u266F]/.test(h)) return h;
+  // Unicode accidentals first: if this ran last it would re-wrap the glyphs the other
+  // two passes just inserted, nesting a span inside a span and doubling the font size.
+  h=h.replace(RE_UNI,(m,g)=>'<span class="acc '+(g==='\u266D'?'f':'s')+'">'+g+'</span>');
+  h=h.replace(RE_NOTE,(m,l,a)=>l+accSpan(a));
+  h=h.replace(RE_DEG,(m,pre,a,d)=>pre+accSpan(a)+d);
+  return h;
+}
+// Walk static prose and swap accidentals in place (never touches script/style or existing spans).
+function fmtStaticProse(root){
+  if(!root) return;
+  const walker=document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(n){
+      if(!n.nodeValue || !/[b#\u266D\u266E\u266F]/.test(n.nodeValue)) return NodeFilter.FILTER_REJECT;
+      const p=n.parentNode;
+      if(!p || /^(SCRIPT|STYLE|OPTION|TEXTAREA)$/.test(p.nodeName)) return NodeFilter.FILTER_REJECT;
+      if(p.classList && p.classList.contains('acc')) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  const jobs=[]; let n;
+  while((n=walker.nextNode())) jobs.push(n);
+  jobs.forEach(node=>{
+    const html=fmtMusic(node.nodeValue);
+    if(html===escHTML(node.nodeValue)) return;            // nothing to change
+    const span=document.createElement('span');
+    span.innerHTML=html;
+    node.parentNode.replaceChild(span,node);
+  });
+}
+
+// Make a custom clickable div behave like a real button for mouse AND keyboard users.
+function makeKeyActivated(el, fn){
+  el.onclick=fn;
+  el.setAttribute('role','button');
+  el.setAttribute('tabindex','0');
+  el.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); fn(); } });
+}
+
+const SCALES = {
+  'Major (Ionian)':        {ints:[0,2,4,5,7,9,11], tip:'Use over major 7 / the I chord. Bright and at home.'},
+  'Dorian (minor)':        {ints:[0,2,3,5,7,9,10], tip:'Your default minor-7 sound (the ii chord). Warm, not sad.'},
+  'Mixolydian (dominant)': {ints:[0,2,4,5,7,9,10], tip:'Over a relaxed dominant 7. The V chord when it is not tense.'},
+  'Minor pentatonic':      {ints:[0,3,5,7,10],     tip:'Five safe notes — hard to play a wrong one. Great for blues and minor.'},
+  'Major pentatonic':      {ints:[0,2,4,7,9],      tip:'Sweet and open. Try it over major and dominant chords.'},
+  'Blues scale':           {ints:[0,3,5,6,7,10],   tip:'Minor pentatonic + the b5 blue note. The crying, vocal sound.'},
+  'Melodic minor':         {ints:[0,2,3,5,7,9,11], tip:'The minor-tonic (i) sound and the parent of the altered scale.'},
+  'Lydian dominant':       {ints:[0,2,4,6,7,9,10], degs:['1','9','3','#11','5','13','b7'],
+                            tip:'A dominant 7 with a #11 — for non-resolving dominants and tritone subs (e.g. the D7 in "Take the A Train").'},
+  'Altered (dominant)':    {ints:[0,1,3,4,6,8,10], degs:['1','b9','#9','3','#11','b13','b7'],
+                            tip:'Maximum tension over a V that resolves down a 5th: b9 #9 #11 b13.'},
+  'Phrygian dominant':     {ints:[0,1,4,5,7,8,10], degs:['1','b9','3','11','5','b13','b7'],
+                            tip:'The V7 sound in a minor key (5th mode of harmonic minor) — b9 and b13 pulling home to i.'},
+  'Half-whole diminished': {ints:[0,1,3,4,6,7,9,10],degs:['1','b9','#9','3','#11','5','13','b7'],
+                            tip:'Spicy dominant sound: gives b9, #9, #11 and a natural 13.'},
+  'Whole-half diminished': {ints:[0,2,3,5,6,8,9,11],degs:['1','9','b3','11','b5','b13','bb7','7'],
+                            tip:'The scale for a diminished 7 chord itself (not for dominants).'},
+  'Locrian (m7b5)':        {ints:[0,1,3,5,6,8,10], degs:['1','b9','b3','11','b5','b13','b7'],
+                            tip:'Over half-diminished chords — the ii of a minor key.'}
+};
+const CHORDS = {
+  'Major 7 (maj7)':   {ints:[0,4,7,11], degs:['1','3','5','7'],    scale:'Major (Ionian)'},
+  'Minor 7 (m7)':     {ints:[0,3,7,10], degs:['1','b3','5','b7'],  scale:'Dorian (minor)'},
+  'Dominant 7 (7)':   {ints:[0,4,7,10], degs:['1','3','5','b7'],   scale:'Mixolydian (dominant)'},
+  'Half-dim (m7b5)':  {ints:[0,3,6,10], degs:['1','b3','b5','b7'], scale:'Locrian (m7b5)'},
+  'Diminished 7':     {ints:[0,3,6,9],  degs:['1','b3','b5','bb7'],scale:'Whole-half diminished'},
+  'Major 6':          {ints:[0,4,7,9],  degs:['1','3','5','6'],    scale:'Major (Ionian)'},
+  'Minor 6':          {ints:[0,3,7,9],  degs:['1','b3','5','6'],   scale:'Melodic minor'}
+};
+// short chord symbol suffixes
+const QUAL = {
+  maj7:{ints:[0,4,7,11],degs:['1','3','5','7'],   sym:'maj7',scale:'Major (Ionian)'},
+  m7:  {ints:[0,3,7,10],degs:['1','b3','5','b7'], sym:'m7',  scale:'Dorian (minor)'},
+  dom7:{ints:[0,4,7,10],degs:['1','3','5','b7'],  sym:'7',   scale:'Mixolydian (dominant)'},
+  m7b5:{ints:[0,3,6,10],degs:['1','b3','b5','b7'],sym:'m7b5',scale:'Locrian (m7b5)'},
+  m7t: {ints:[0,3,7,10],degs:['1','b3','5','b7'], sym:'m7',  scale:'Dorian (minor)'} // minor tonic
+};
+// Degree labels for the notes of a scale (custom where the default flat spelling would mislead).
+function scaleDegs(name){ const s=SCALES[name]; return s.degs || s.ints.map(i=>degName(i,true)); }
+
+function rootMidiFor(pc, baseOct){ return 12*(baseOct+1) + pc; } // C4 = 60 when baseOct=4
+const SHARP_KEYS = new Set([7,2,9,4,11]); // G D A E B — spell with sharps for readability
+function useSharpForRoot(pc){ return SHARP_KEYS.has(((pc%12)+12)%12); }
+// The conventional spelling of a key centre (fewest accidentals). Used for roots we DERIVE
+// from the tonic, so the Giant Steps cycle in B reads B / G / Eb, not B / G / D#.
+function keyCentreName(pc){ pc=((pc%12)+12)%12; return pc===6? 'F#' : NOTE_NAMES[pc]; }
+
+/* =========================================================================
+   TAB SWITCHING
+   ========================================================================= */
+document.querySelectorAll('#nav button').forEach(b=>{
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('#nav button').forEach(x=>{ x.classList.remove('active'); x.removeAttribute('aria-current'); });
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    document.getElementById('tab-'+b.dataset.tab).classList.add('active');
+    b.setAttribute('aria-current','page');
+    window.scrollTo({top:0,behavior:'smooth'});
+  });
+});
+
+/* ---- Learn level filter ---- */
+document.querySelectorAll('#tab-learn > .card:not([data-level]):not(.lvl-picker)').forEach(c=>c.setAttribute('data-level','beginner'));
+function setLevel(lvl){
+  document.querySelectorAll('#lvl-filter button').forEach(b=>{
+    const on = b.dataset.lvl===lvl;
+    b.classList.toggle('sec', !on);
+    b.setAttribute('aria-pressed', on?'true':'false');
+  });
+  document.querySelectorAll('#tab-learn .card[data-level]').forEach(c=>{
+    c.style.display = (lvl==='all'||c.getAttribute('data-level')===lvl)?'':'none';
+  });
+}
+document.querySelectorAll('#lvl-filter button').forEach(b=> b.onclick=()=>setLevel(b.dataset.lvl));
+setLevel('beginner');
+
+/* =========================================================================
+   THEORY LAB
+   ========================================================================= */
+const thRoot=document.getElementById('th-root'), thType=document.getElementById('th-type');
+NOTE_NAMES.forEach((n,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=pcName(i,useSharpForRoot(i)); thRoot.appendChild(o); });
+Object.keys(SCALES).forEach(k=>{ const o=document.createElement('option'); o.value='S:'+k; o.textContent='Scale · '+k; thType.appendChild(o); });
+Object.keys(CHORDS).forEach(k=>{ const o=document.createElement('option'); o.value='C:'+k; o.textContent='Chord · '+k; thType.appendChild(o); });
+thRoot.value='0';
+
+function currentTheory(){
+  const pc=parseInt(thRoot.value); const [kind,name]=thType.value.split(/:(.+)/);
+  const useSharp=useSharpForRoot(pc);
+  const def = kind==='S'? SCALES[name] : CHORDS[name];
+  const ints = def.ints;
+  const rootName = pcName(pc,useSharp);
+  const degs = kind==='S'? scaleDegs(name) : def.degs;
+  const notes = ints.map((s,i)=>{
+    const deg = degs[i];
+    return {pc:(pc+s)%12, semi:s, deg, name: noteName(pc+s, deg, rootName, useSharp)};
+  });
+  return {pc,kind,name,def,ints,notes,useSharp,rootName};
+}
+function renderTheory(){
+  const T=currentTheory();
+  document.getElementById('th-formula').innerHTML =
+    '<b>'+fmtMusic(pcName(T.pc,T.useSharp)+' '+T.name)+'</b> &nbsp; degrees: '+T.notes.map(n=>fmtMusic(n.deg)).join(' · ');
+  const box=document.getElementById('th-notes'); box.innerHTML='';
+  T.notes.forEach(n=>{
+    const el=document.createElement('div'); el.className='notebtn';
+    el.innerHTML='<div class="nm">'+fmtMusic(n.name)+'</div><div class="dg">'+fmtMusic(n.deg)+'</div>';
+    makeKeyActivated(el, ()=> playTone(rootMidiFor(T.pc,4)+n.semi, null, 0.5, {voice:'vibes',gain:0.20}));
+    box.appendChild(el);
+  });
+  const tip = T.kind==='S'? T.def.tip : ('Chord tones 1·3·5·7. The 3rd and 7th are the guide tones. Suggested scale: '+T.def.scale+'.');
+  document.getElementById('th-tip').innerHTML='💡 '+fmtMusic(tip);
+}
+function theoryMidis(){
+  const T=currentTheory();
+  return T.ints.map(s=> rootMidiFor(T.pc,4)+s );
+}
+document.getElementById('th-play').onclick=()=>{
+  const T=currentTheory(); const midis=T.ints.map(s=>rootMidiFor(T.pc,4)+s).concat([rootMidiFor(T.pc,4)+12]);
+  const ctx=ac(); let t=ctx.currentTime+0.05;
+  midis.forEach(m=>{ playTone(m,t,0.32,{voice:'vibes',gain:0.20}); t+=0.34; });
+};
+document.getElementById('th-chord').onclick=()=>{ playChordTones(theoryMidis(), null, 1.6, {}); };
+thRoot.onchange=renderTheory; thType.onchange=renderTheory;
+renderTheory();
+
+/* =========================================================================
+   PRACTICE DRILLS
+   ========================================================================= */
+const drKey=document.getElementById('dr-key');
+NOTE_NAMES.forEach((n,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=pcName(i,useSharpForRoot(i)); drKey.appendChild(o); });
+drKey.value='0';
+let drSequence=[]; // array of {midi,name,deg,label}
+
+function buildDrill(){
+  const key=parseInt(drKey.value); const type=document.getElementById('dr-type').value;
+  const us=useSharpForRoot(key);
+  const conceptEl=document.getElementById('dr-concept');
+  const barsEl=document.getElementById('dr-bars'); barsEl.innerHTML='';
+  const notesEl=document.getElementById('dr-notes'); notesEl.innerHTML='';
+  let bars=[]; let seq=[]; let concept='', how='';
+
+  const ii=(key+2)%12, V=(key+7)%12, I=key; // ii V I roots
+
+  // All drills use absolute semitones above the key root so the melodic contour is preserved
+  // exactly as written — a half step below a target really sounds a half step below it.
+  // `rootPc` is the LOCAL chord root the degree label refers to, used for correct spelling.
+  const keyRootMidi = rootMidiFor(I,4);
+  function pushAbs(semi, deg, rootPc, rootNameOverride){
+    const pc=((((I+semi)%12)+12))%12;
+    const rn = rootNameOverride || pcName(((rootPc==null?I:rootPc)%12+12)%12, us);
+    seq.push({pc, name:noteName(pc,deg,rn,us), deg:deg, midi:keyRootMidi+semi});
+  }
+
+  if(type==='guidetone'){
+    concept='<span class="tag">Concept</span><b>Guide-tone line over ii–V–I.</b> Two voices, each barely moving: every chord\'s 7th slides down a half step to become the next chord\'s 3rd. This alone sounds like jazz.';
+    bars=[{sym:pcName(ii,us)+'m7'},{sym:pcName(V,us)+'7'},{sym:pcName(I,us)+'maj7'}];
+    // Voice 1: b7 of ii -> 3 of V -> 7 of I     (in C: C -> B -> B)
+    pushAbs(12,'b7', ii); pushAbs(11,'3', V); pushAbs(11,'7', I);
+    // Voice 2: 3 of ii -> b7 of V -> 3 of I     (in C: F -> F -> E)
+    pushAbs(5,'b3', ii); pushAbs(5,'b7', V);  pushAbs(4,'3', I);
+    how='The first three notes are voice 1, the last three voice 2. Each moves by a half step or not at all — that is the voice-leading spine. Sing each voice, then play it in all 12 keys.';
+  }
+  else if(type==='enclosure'){
+    concept='<span class="tag">Concept</span><b>Enclosure into the 3rd of '+pcName(I,us)+'maj7.</b> Surround the target from a half step above and a half step below, then resolve onto it.';
+    bars=[{sym:'half above'},{sym:'half below'},{sym:'TARGET'}];
+    pushAbs(5,'11', I);              // half step above the 3rd  (in C: F)
+    pushAbs(3,'#9', I);              // half step below the 3rd  (in C: D#)
+    pushAbs(4,'3', I);               // the target                (in C: E)
+    how='Play it slowly: the two neighbours squeeze in from either side and the arrival releases the tension. Try enclosing the 7th, 5th and root too, and over every chord.';
+  }
+  else if(type==='251lick'){
+    concept='<span class="tag">Concept</span><b>A classic ii–V–I bebop lick in '+pcName(I,us)+'.</b> Chord tones on strong beats, chromatic approaches between.';
+    bars=[{sym:pcName(ii,us)+'m7'},{sym:pcName(V,us)+'7'},{sym:pcName(I,us)+'maj7'}];
+    // Over ii: arpeggio up from the 3rd (in C, Dm7: F A C D)
+    pushAbs(5,'b3',ii); pushAbs(9,'5',ii); pushAbs(12,'b7',ii); pushAbs(14,'1',ii);
+    // Over V: descend b7-13-b13-3, the b13 a chromatic passing tone (in C, G7: F E Eb B)
+    pushAbs(17,'b7',V); pushAbs(16,'13',V); pushAbs(15,'b13',V); pushAbs(11,'3',V);
+    // Over I: enclose the 3rd from above and below, then land (in C: D C D# E)
+    pushAbs(14,'9',I); pushAbs(17,'11',I); pushAbs(15,'#9',I); pushAbs(16,'3',I);
+    how='Play it slowly and legato, then swing it. Notice the chromatic step F–E–Eb over the V (in the key of C) and the enclosure at the end — the line lands on the 3rd of '+pcName(I,us)+', a strong, resolved ending.';
+  }
+  else if(type==='scaleseq'){
+    concept='<span class="tag">Concept</span><b>Scale in 3rds — '+pcName(I,us)+' major.</b> A core technical pattern that builds melodic vocabulary.';
+    bars=[{sym:'1-3'},{sym:'2-4'},{sym:'3-5 …'}];
+    const maj=[0,2,4,5,7,9,11];
+    // ascend the scale, pairing each degree with the note a 3rd above it (octave preserved)
+    for(let i=0;i<6;i++){
+      const a=maj[i], b=maj[(i+2)%7]+((i+2)>=7?12:0);
+      pushAbs(a, degName(maj[i],true), I);
+      pushAbs(b, degName(maj[(i+2)%7],true), I);
+    }
+    how='Every pair is a true ascending 3rd. Practice it ascending and descending, then in 4ths and 6ths — this turns scales into usable melodic shapes.';
+  }
+  else if(type==='digital'){
+    concept='<span class="tag">Concept · Intermediate</span><b>The 1-2-3-5 digital pattern through ii–V–I in '+pcName(I,us)+'.</b> Outline each chord melodically — you sound like you are spelling every change.';
+    bars=[{sym:pcName(ii,us)+'m7'},{sym:pcName(V,us)+'7'},{sym:pcName(I,us)+'maj7'}];
+    pushAbs(2,'1',ii); pushAbs(4,'2',ii); pushAbs(5,'b3',ii); pushAbs(9,'5',ii);   // Dm7: D E F A
+    pushAbs(7,'1',V);  pushAbs(9,'2',V);  pushAbs(11,'3',V);  pushAbs(14,'5',V);   // G7:  G A B D
+    pushAbs(12,'1',I); pushAbs(14,'2',I); pushAbs(16,'3',I);  pushAbs(19,'5',I);   // Cmaj7: C D E G
+    how='Each chord uses its own scale (note the b3 on the minor chord). Run it up and down through all twelve keys.';
+  }
+  else if(type==='39arp'){
+    concept='<span class="tag">Concept · Intermediate</span><b>3-to-9 arpeggios over ii–V–I in '+pcName(I,us)+'.</b> Start on the 3rd and stack 3-5-7-9 — you automatically catch the guide tones plus a sweet 9th.';
+    bars=[{sym:pcName(ii,us)+'m7'},{sym:pcName(V,us)+'7'},{sym:pcName(I,us)+'maj7'}];
+    pushAbs(5,'b3',ii); pushAbs(9,'5',ii); pushAbs(12,'b7',ii); pushAbs(16,'9',ii);  // Dm7: F A C E
+    pushAbs(11,'3',V);  pushAbs(14,'5',V);  pushAbs(17,'b7',V);  pushAbs(21,'9',V);  // G7:  B D F A
+    pushAbs(16,'3',I);  pushAbs(19,'5',I);  pushAbs(23,'7',I);   pushAbs(26,'9',I);  // Cmaj7: E G B D (stays in register)
+    const arp=(r,ds)=>ds.map(d=>noteName((r+d)%12, null, null, us)).join(' ');
+    how='Over '+pcName(ii,us)+'m7 that is '+arp(ii,[3,7,10,14])+'; over '+pcName(V,us)+'7, '+arp(V,[4,7,10,14])+'; over '+pcName(I,us)+'maj7, '+arp(I,[4,7,11,14])+'. The 3rds and 7ths glue the chords together; the 9ths add color.';
+  }
+  else if(type==='bebop'){
+    concept='<span class="tag">Concept · Intermediate</span><b>The dominant bebop scale over '+pcName(V,us)+'7.</b> Add a chromatic passing tone between the b7 and the root so, starting on a chord tone, every downbeat lands on a chord tone.';
+    bars=[{sym:pcName(V,us)+'7'},{sym:'8-note scale'},{sym:'→ '+pcName(I,us)+'maj7'}];
+    // G bebop: G A B C D E F F# (0,2,4,5,7,9,10,11 from V)
+    [ [0,'1'],[2,'9'],[4,'3'],[5,'11'],[7,'5'],[9,'13'],[10,'b7'],[11,'7'] ].forEach(([s,d])=> pushAbs(7+s,d,V));
+    pushAbs(16,'3',I);  // resolve up to the 3rd of I
+    how='The chord tones (1 3 5 b7) all fall on the beat; the passing tone '+noteName((V+11)%12,'7',pcName(V,us),us)+' fills the gap between the b7 and the root. This is the rhythmic secret of bebop lines.';
+  }
+  else if(type==='tritonesub'){
+    const subName=keyCentreName((I+1)%12);
+    concept='<span class="tag">Concept · Intermediate</span><b>Tritone substitution: '+pcName(ii,us)+'m7 → '+subName+'7 → '+pcName(I,us)+'maj7.</b> Replace the '+pcName(V,us)+'7 with the dominant a tritone away — it shares the same 3rd and 7th.';
+    bars=[{sym:pcName(ii,us)+'m7'},{sym:subName+'7 (sub)'},{sym:pcName(I,us)+'maj7'}];
+    const sub=(I+1)%12;
+    pushAbs(2,'1',ii); pushAbs(5,'b3',ii); pushAbs(9,'5',ii); pushAbs(12,'b7',ii);  // Dm7 ascending
+    pushAbs(11,'b7',sub,subName); pushAbs(8,'5',sub,subName); pushAbs(5,'3',sub,subName); pushAbs(1,'1',sub,subName);
+    pushAbs(0,'1',I); pushAbs(4,'3',I);                                             // Cmaj7
+    how=subName+'7 shares the tension pair with '+pcName(V,us)+'7, so it resolves the same way — but the root slides down a half step for a smoother, hipper cadence.';
+  }
+  else if(type==='upperstructure'){
+    concept='<span class="tag">Concept · Advanced</span><b>Upper-structure triad over '+pcName(V,us)+'7.</b> Play a major triad a whole step above the root: it spells the 9, #11 and 13 — the bright <em>un</em>altered Lydian-dominant sound.';
+    bars=[{sym:pcName(V,us)+'7'},{sym:pcName((V+2)%12,us)+' major triad'},{sym:pcName(I,us)+'maj7'}];
+    pushAbs(9,'9',V); pushAbs(13,'#11',V); pushAbs(16,'13',V);            // A major triad over G7: A C# E
+    pushAbs(16,'3',I);                                                    // common-tone resolution
+    const usTriad=noteName((V+2)%12,'9',pcName(V,us),us);
+    how='The '+usTriad+' triad over '+pcName(V,us)+'7 gives 9/#11/13. Its top note is also the 3rd of '+pcName(I,us)+'maj7, so it resolves by common tone — the same note, reheard.';
+  }
+  else if(type==='altered'){
+    concept='<span class="tag">Concept · Advanced</span><b>Altered scale line over '+pcName(V,us)+'7alt.</b> The 7th mode of melodic minor supplies b9, #9, #11 and b13 — every note that pulls into the '+pcName(I,us)+'.';
+    bars=[{sym:pcName(V,us)+'7alt'},{sym:'descending'},{sym:'→ '+pcName(I,us)+'maj7'}];
+    [ [10,'b7'],[8,'b13'],[6,'#11'],[4,'3'],[3,'#9'],[1,'b9'],[0,'1'] ].forEach(([s,d])=> pushAbs(7+s,d,V));
+    pushAbs(4,'3',I);
+    how='Every altered tension resolves by a half step into a chord tone of '+pcName(I,us)+'maj7. Play it slowly and hear the pull.';
+  }
+  else if(type==='pentsuper'){
+    const pentRoot=noteName((I+2)%12,'9',pcName(I,us),us);
+    concept='<span class="tag">Concept · Advanced</span><b>Pentatonic superimposition over '+pcName(I,us)+'maj7.</b> Lay a '+pentRoot+' major pentatonic (a whole step up) over the chord to get 9, 3, #11, 13 and 7 — a shimmering Lydian color.';
+    bars=[{sym:pcName(I,us)+'maj7'},{sym:pentRoot+' maj pentatonic'},{sym:'Lydian color'}];
+    pushAbs(2,'9',I); pushAbs(4,'3',I); pushAbs(6,'#11',I); pushAbs(9,'13',I); pushAbs(11,'7',I); pushAbs(14,'9',I);
+    how='A major pentatonic a whole step above any major 7 chord gives its brightest, Lydian colors. Resolve back to a chord tone to land it.';
+  }
+  else if(type==='coltrane'){
+    concept='<span class="tag">Concept · Advanced</span><b>Coltrane major-3rd cycle in '+pcName(I,us)+'.</b> Key centers move by major thirds (the "Giant Steps" matrix). Run a clean 1-2-3-5 cell through each.';
+    bars=[{sym:keyCentreName(I)+'maj7'},{sym:keyCentreName((I+8)%12)+'maj7'},{sym:keyCentreName((I+4)%12)+'maj7'}];
+    // Keep each 1-2-3-5 cell close to the previous one instead of leaping an octave.
+    let ref=0;
+    [0,8,4].forEach(c=>{
+      let base=c; while(base-ref>6) base-=12; while(base-ref<-6) base+=12;
+      const localRoot=(I+c)%12;                 // absolute root of this key centre, for spelling
+      [0,2,4,7].forEach(s=> pushAbs(base+s, degName(s,true), localRoot, keyCentreName(localRoot)));
+      ref=base;
+    });
+    how='Giant Steps cycles its tonics by major thirds. Practice the 1-2-3-5 cell cleanly through '+keyCentreName(I)+', '+keyCentreName((I+8)%12)+' and '+keyCentreName((I+4)%12)+' until the changes feel natural.';
+  }
+  else if(type==='motif'){
+    concept='<span class="tag">Concept · Advanced</span><b>Motivic development through ii–V–I in '+pcName(I,us)+'.</b> Take one three-note shape and move it to fit each chord — the seed of telling a story.';
+    bars=[{sym:pcName(ii,us)+'m7'},{sym:pcName(V,us)+'7'},{sym:pcName(I,us)+'maj7'}];
+    pushAbs(2,'1',ii); pushAbs(4,'2',ii); pushAbs(5,'b3',ii);   // D E F over Dm7
+    pushAbs(7,'1',V);  pushAbs(9,'2',V);  pushAbs(11,'3',V);    // G A B over G7
+    pushAbs(12,'1',I); pushAbs(14,'2',I); pushAbs(16,'3',I);    // C D E over Cmaj7
+    how='Same three-note contour, refit to each chord. Now invert it, stretch its rhythm, or start it on a different beat — that is development.';
+  }
+  else { // pentpattern
+    concept='<span class="tag">Concept</span><b>Pentatonic 4-note pattern in '+pcName(I,us)+' minor pentatonic.</b> A gateway to fluent, bluesy lines.';
+    bars=[{sym:'cell 1'},{sym:'cell 2'},{sym:'cell 3'}];
+    const pent=[0,3,5,7,10];
+    // 4-note cell (up-up-down) moved up the scale; the octave lift is preserved so it really climbs
+    for(let i=0;i<3;i++){
+      [0,1,2,1].forEach(step=>{
+        const idx=i+step, oct=Math.floor(idx/5)*12;
+        pushAbs(pent[idx%5]+oct, degName(pent[idx%5],true), I);
+      });
+    }
+    how='Each cell starts one scale step higher than the last, so the pattern really climbs. Then displace it rhythmically for instant sophistication.';
+  }
+
+  conceptEl.innerHTML=concept; fmtStaticProse(conceptEl);
+  bars.forEach(b=>{ const d=document.createElement('div'); d.className='bar'; d.innerHTML=fmtMusic(b.sym); barsEl.appendChild(d); });
+  seq.forEach(n=>{ const el=document.createElement('div'); el.className='notebtn';
+    el.innerHTML='<div class="nm">'+fmtMusic(n.name)+'</div><div class="dg">'+fmtMusic(n.deg)+'</div>';
+    makeKeyActivated(el, ()=>playTone(n.midi,null,0.4,{voice:'vibes',gain:0.20}));
+    notesEl.appendChild(el); });
+  document.getElementById('dr-how').innerHTML='🎯 '+fmtMusic(how);
+  drSequence=seq;
+}
+document.getElementById('dr-play').onclick=()=>{
+  const ctx=ac(); let t=ctx.currentTime+0.05;
+  drSequence.forEach(n=>{ playTone(n.midi,t,0.3,{voice:'vibes',gain:0.20}); t+=0.33; });
+};
+document.getElementById('dr-new').onclick=buildDrill;
+document.getElementById('dr-type').onchange=buildDrill;
+drKey.onchange=buildDrill;
+buildDrill();
+
+/* =========================================================================
+   EAR TRAINING
+   ========================================================================= */
+const INTERVALS=[
+  ['Minor 2nd',1],['Major 2nd',2],['Minor 3rd',3],['Major 3rd',4],['Perfect 4th',5],
+  ['Tritone',6],['Perfect 5th',7],['Minor 6th',8],['Major 6th',9],['Minor 7th',10],
+  ['Major 7th',11],['Octave',12]
+];
+const EAR_CHORDS=[['Major 7',[0,4,7,11]],['Minor 7',[0,3,7,10]],['Dominant 7',[0,4,7,10]],['Half-diminished (m7b5)',[0,3,6,10]],['Diminished 7',[0,3,6,9]]];
+const EAR_EXT=[
+  ['Major 9',[0,4,7,11,14]],
+  ['Dominant 9',[0,4,7,10,14]],
+  ['Dominant 7♭9',[0,4,7,10,13]],
+  ['Dominant 7♯11 (Lydian dom)',[0,4,7,10,18]],
+  ['Dominant 7♯9',[0,4,7,10,15]],
+  ['Minor 9',[0,3,7,10,14]],
+  ['Minor-major 7',[0,3,7,11]]
+];
+const EAR_PROGS=[
+  ['ii–V–I (major)', [[2,'m7'],[7,'dom7'],[0,'maj7']]],
+  ['ii–V–i (minor)', [[2,'m7b5'],[7,'dom7'],[0,'m7t']]],
+  ['I–vi–ii–V (turnaround)', [[0,'maj7'],[9,'m7'],[2,'m7'],[7,'dom7']]],
+  ['12-bar blues opening (I7–IV7–I7)', [[0,'dom7'],[5,'dom7'],[0,'dom7']]],
+  ['Tritone-sub ii–V (iim7–♭II7–I)', [[2,'m7'],[1,'dom7'],[0,'maj7']]],
+  ['Backdoor ii–V (iv–♭VII7–I)', [[5,'m7'],[10,'dom7'],[0,'maj7']]],
+  ['Coltrane fragment (I–♭III7–♭VI)', [[0,'maj7'],[3,'dom7'],[8,'maj7']]]
+];
+let earState={answer:null, mode:'interval', score:0, streak:0, total:0, replay:null, lastIdx:{}};
+
+// Genuinely random, but never the same question twice in a row for a given mode.
+function pickIdx(mode, len){
+  let i=Math.floor(Math.random()*len);
+  if(len>1 && i===earState.lastIdx[mode]) i=(i+1+Math.floor(Math.random()*(len-1)))%len;
+  earState.lastIdx[mode]=i; return i;
+}
+function earNew(autoplay){
+  const mode=document.getElementById('ear-mode').value; earState.mode=mode;
+  const fb=document.getElementById('ear-feedback'); fb.textContent=''; fb.className='feedback';
+  const ch=document.getElementById('ear-choices'); ch.innerHTML='';
+  const base = 55 + Math.floor(Math.random()*10); // random root so you can't memorise absolute pitch
+  let choices=[], correctLabel='', player=null;
+
+  if(mode==='interval'){
+    const idx=pickIdx(mode, INTERVALS.length);
+    const [label,semi]=INTERVALS[idx]; correctLabel=label;
+    player=()=>{ const ctx=ac(); const t=ctx.currentTime+0.05;
+      playTone(base,t,0.6,{voice:'vibes',gain:0.20});
+      playTone(base+semi,t+0.65,0.6,{voice:'vibes',gain:0.20}); };
+    choices=INTERVALS.map(x=>x[0]);
+  } else if(mode==='chord'){
+    const idx=pickIdx(mode, EAR_CHORDS.length);
+    const [label,ints]=EAR_CHORDS[idx]; correctLabel=label;
+    player=()=>{ playChordTones(ints.map(s=>base+s), null, 1.6, {}); };
+    choices=EAR_CHORDS.map(x=>x[0]);
+  } else if(mode==='extended'){
+    const idx=pickIdx(mode, EAR_EXT.length);
+    const [label,ints]=EAR_EXT[idx]; correctLabel=label;
+    player=()=>{ playChordTones(ints.map(s=>base+s), null, 1.8, {}); };
+    choices=EAR_EXT.map(x=>x[0]);
+  } else {
+    const idx=pickIdx(mode, EAR_PROGS.length);
+    const [label,prog]=EAR_PROGS[idx]; correctLabel=label;
+    player=()=>{ const ctx=ac(); let t=ctx.currentTime+0.05;
+      prog.forEach(([rootoff,q])=>{ const ints=QUAL[q].ints; playChordTones(ints.map(s=>base+rootoff+s), t, 0.9,{}); t+=1.0; }); };
+    choices=EAR_PROGS.map(x=>x[0]);
+  }
+
+  earState.answer=correctLabel; earState.replay=player;
+  choices.forEach(c=>{ const b=document.createElement('button');
+    b.dataset.label=c; b.innerHTML=fmtMusic(c);
+    b.onclick=()=>earAnswer(b,c); ch.appendChild(b); });
+  // Only sound the question when a user gesture asked for it — browsers block audio before
+  // the first interaction, and an autoplaying question would otherwise fire on an unrelated tab.
+  if(autoplay!==false) player();
+}
+function earAnswer(btn, choice){
+  const fb=document.getElementById('ear-feedback');
+  earState.total++;
+  document.querySelectorAll('#ear-choices button').forEach(b=>b.disabled=true);
+  if(choice===earState.answer){
+    btn.classList.add('correct'); btn.innerHTML='✓ '+fmtMusic(btn.dataset.label);
+    fb.innerHTML='✓ Correct — '+fmtMusic(earState.answer); fb.className='feedback good';
+    earState.score++; earState.streak++;
+  } else {
+    btn.classList.add('wrong'); btn.innerHTML='✗ '+fmtMusic(btn.dataset.label);
+    fb.innerHTML='✗ It was '+fmtMusic(earState.answer); fb.className='feedback bad';
+    earState.streak=0;
+    document.querySelectorAll('#ear-choices button').forEach(b=>{
+      if(b.dataset.label===earState.answer){ b.classList.add('correct'); b.innerHTML='✓ '+fmtMusic(b.dataset.label); } });
+  }
+  document.getElementById('ear-score').textContent=earState.score;
+  document.getElementById('ear-streak').textContent=earState.streak;
+  document.getElementById('ear-total').textContent=earState.total;
+}
+document.getElementById('ear-new').onclick=()=>earNew(true);
+document.getElementById('ear-replay').onclick=()=>{ if(earState.replay) earState.replay(); };
+document.getElementById('ear-mode').onchange=()=>earNew(true);
+earNew(false);   // build the first question silently; it sounds when the user clicks
+
+/* =========================================================================
+   PLAY-ALONG ENGINE  (lookahead scheduler)
+   ========================================================================= */
+// progression definitions: array of bars {root, qual}
+function prog251(key){ return [ {root:(key+2)%12,q:'m7'},{root:(key+7)%12,q:'dom7'},{root:key,q:'maj7'},{root:key,q:'maj7'} ]; }
+const ALT='Altered (dominant)', PHR='Phrygian dominant', LYD='Lydian dominant';
+function prog251min(key){ return [ {root:(key+2)%12,q:'m7b5'},{root:(key+7)%12,q:'dom7',scale:ALT},{root:key,q:'m7t'},{root:key,q:'m7t'} ]; }
+function progBlues(key){ // 12-bar in key (F default handled by key=5)
+  const I=key,IV=(key+5)%12,V=(key+7)%12;
+  return [ {root:I,q:'dom7'},{root:IV,q:'dom7'},{root:I,q:'dom7'},{root:I,q:'dom7'},
+           {root:IV,q:'dom7'},{root:IV,q:'dom7'},{root:I,q:'dom7'},{root:I,q:'dom7'},
+           {root:V,q:'dom7'},{root:IV,q:'dom7'},{root:I,q:'dom7'},{root:V,q:'dom7'} ]; }
+function progDorian(key){ return Array.from({length:4},()=>({root:key,q:'m7t'})); }
+function progCycle(startKey){ // ii-V-I resolving down whole steps a couple of times
+  let bars=[]; let k=startKey;
+  for(let i=0;i<3;i++){ bars.push({root:(k+2)%12,q:'m7'},{root:(k+7)%12,q:'dom7'},{root:k,q:'maj7'},{root:k,q:'maj7'}); k=(k+10)%12; }
+  return bars;
+}
+function progAutumn(key){ // Autumn Leaves A section, key = Bb major (key param = Bb = 10)
+  const P=(off,q,scale)=>({root:(key+off)%12,q,scale}); // offsets from Bb
+  return [ P(2,'m7'),P(7,'dom7'),P(0,'maj7'),P(5,'maj7'),
+           P(11,'m7b5'),P(4,'dom7',ALT),P(9,'m7t'),P(9,'m7t') ]; // Cm7 F7 Bbmaj7 Ebmaj7 | Am7b5 D7 Gm7 Gm7
+}
+// The sub is a non-resolving dominant a half step above I — Lydian dominant is its sound.
+function progTTsub(key){ return [ {root:(key+2)%12,q:'m7'},{root:(key+1)%12,q:'dom7',scale:LYD},{root:key,q:'maj7'},{root:key,q:'maj7'} ]; }
+function progMinorBlues(key){
+  const I=key,IV=(key+5)%12,bVI=(key+8)%12,V=(key+7)%12;
+  return [ {root:I,q:'m7t'},{root:I,q:'m7t'},{root:I,q:'m7t'},{root:I,q:'m7t'},
+           {root:IV,q:'m7t'},{root:IV,q:'m7t'},{root:I,q:'m7t'},{root:I,q:'m7t'},
+           {root:bVI,q:'dom7',scale:LYD},{root:V,q:'dom7',scale:ALT},{root:I,q:'m7t'},{root:V,q:'dom7',scale:ALT} ];
+}
+function progColtrane(key){ // major-3rd cycle with V7 connectors: I | V/bVI | bVI ...
+  const centers=[key,(key+8)%12,(key+4)%12];
+  let bars=[];
+  centers.forEach((c,i)=>{ bars.push({root:c,q:'maj7'}); bars.push({root:((centers[(i+1)%3])+7)%12,q:'dom7'}); });
+  return bars; // 6 bars: Imaj7, V7-of-next, repeat around the cycle
+}
+// ----- Jazz standards (chord changes only) -----
+function progSoWhat(){ const a=[]; const D=()=>a.push({root:2,q:'m7t'}), E=()=>a.push({root:3,q:'m7t'});
+  for(let i=0;i<16;i++)D(); for(let i=0;i<8;i++)E(); for(let i=0;i<8;i++)D(); return a; } // full 32-bar AABA: Dm7 A A, Ebm7 B, Dm7 A (Miles/Coltrane)
+function progBlueBossa(){ return [
+  {root:0,q:'m7t'},{root:0,q:'m7t'},{root:5,q:'m7'},{root:5,q:'m7'},
+  {root:2,q:'m7b5'},{root:7,q:'dom7',scale:ALT},{root:0,q:'m7t'},{root:0,q:'m7t'},
+  {root:3,q:'m7'},{root:8,q:'dom7'},{root:1,q:'maj7'},{root:1,q:'maj7'},
+  {root:2,q:'m7b5'},{root:7,q:'dom7',scale:ALT},{root:0,q:'m7t'},{root:7,q:'dom7',scale:ALT} ]; } // Blue Bossa in Cm (Kenny Dorham)
+// Take the A Train: the II7 is the tune's signature D7(#11) — Lydian dominant, not Mixolydian.
+function progATrain(){ return [
+  {root:0,q:'maj7'},{root:0,q:'maj7'},{root:2,q:'dom7',scale:LYD},{root:2,q:'dom7',scale:LYD},
+  {root:2,q:'m7'},{root:7,q:'dom7'},{root:0,q:'maj7'},{root:0,q:'maj7'} ]; }
+function rhythmAsection(){ return [   // the VI7 (G7) resolves to Cm7, so it takes altered tensions
+  {root:10,q:'maj7',root2:7,q2:'dom7',scale2:ALT}, {root:0,q:'m7',root2:5,q2:'dom7'},
+  {root:2,q:'m7', root2:7,q2:'dom7',scale2:ALT},   {root:0,q:'m7',root2:5,q2:'dom7'},
+  {root:5,q:'m7', root2:10,q2:'dom7'},             {root:3,q:'maj7',root2:8,q2:'dom7'},
+  {root:2,q:'m7', root2:7,q2:'dom7',scale2:ALT},   {root:0,q:'m7',root2:5,q2:'dom7'} ]; }
+function progRhythmA(){ return rhythmAsection(); }                       // just the A section
+function progRhythmFull(){                                               // full 32-bar AABA
+  const A=rhythmAsection();
+  const B=[ {root:2,q:'dom7'},{root:2,q:'dom7'},{root:7,q:'dom7'},{root:7,q:'dom7'},   // D7 D7 G7 G7
+            {root:0,q:'dom7'},{root:0,q:'dom7'},{root:5,q:'dom7'},{root:5,q:'dom7'} ]; // C7 C7 F7 F7 (III7-VI7-II7-V7 bridge)
+  return [...A, ...A, ...B, ...A];
+}
+
+const PROGS={
+  '251C':{key:0,build:prog251,name:'ii–V–I in C major'},
+  '251minC':{key:0,build:prog251min,name:'ii–V–i in C minor'},
+  'bluesF':{key:5,build:progBlues,name:'12-bar Blues in F'},
+  'dorianD':{key:2,build:progDorian,name:'Modal vamp — D Dorian'},
+  'autumn':{key:10,build:progAutumn,name:'Autumn Leaves (A)'},
+  'ttsub':{key:0,build:progTTsub,name:'Tritone-sub turnaround'},
+  'cycle':{key:0,build:progCycle,name:'ii–V–I moving through keys'},
+  'minorblues':{key:0,build:progMinorBlues,name:'Minor blues in C'},
+  'coltrane':{key:0,build:progColtrane,name:'Coltrane cycle'},
+  'sowhat':{key:0,build:progSoWhat,name:'So What — full AABA (modal)'},
+  'bluebossa':{key:0,build:progBlueBossa,name:'Blue Bossa'},
+  'atrain':{key:0,build:progATrain,name:'Take the A Train (A)'},
+  'rhythmA':{key:0,build:progRhythmA,name:'Rhythm Changes (A) — Bb'},
+  'rhythmFull':{key:0,build:progRhythmFull,name:'Rhythm Changes — full AABA (Bb)'}
+};
+
+let PA={ playing:false, bars:[], bar:0, beat:0, tempo:120, swing:1, vol:1, nextTime:0, timer:null, lookahead:0.1, gen:0 };
+
+function paBuild(){
+  const sel=document.getElementById('pa-prog').value; const def=PROGS[sel];
+  PA.bars=def.build(def.key); PA.bar=0; PA.beat=0; PA.gen++;
+  PA.walk=null; PA.comp=null; PA.voice=null; PA.voice2=null; PA.voiceNext=null;
+  renderPABars();
+  updateNowPlaying(0,0);
+}
+function barIsSplit(b){ return b.root2!=null && b.root2!==undefined; }
+function barChord(b,beat){
+  return (barIsSplit(b)&&beat>=2)? {root:b.root2,q:b.q2,scale:b.scale2}
+                                 : {root:b.root, q:b.q, scale:b.scale};
+}
+function chordSymOne(root,q){ const us=useSharpForRoot(root); return pcName(root,us)+QUAL[q].sym; }
+function chordSymbol(b){ return barIsSplit(b)? chordSymOne(b.root,b.q)+' '+chordSymOne(b.root2,b.q2) : chordSymOne(b.root,b.q); }
+
+function renderPABars(){
+  const el=document.getElementById('pa-bars'); el.innerHTML='';
+  el.style.gridTemplateColumns='repeat('+Math.min(4,Math.max(3,PA.bars.length>8?4:PA.bars.length))+',1fr)';
+  PA.bars.forEach((b,i)=>{ const d=document.createElement('div'); d.className='bar'+(i===PA.bar?' now':'');
+    d.id='pabar'+i; d.innerHTML=fmtMusic(chordSymbol(b))+'<small>bar '+(i+1)+'</small>'; el.appendChild(d); });
+}
+function updateNowPlaying(barIdx, half){
+  const bar=PA.bars[barIdx]; if(!bar) return;
+  const b = barChord(bar, half?2:0);
+  const us=useSharpForRoot(b.root);
+  const rootName=pcName(b.root,us);
+  const key=chordSymOne(b.root,b.q)+'|'+(b.scale||'');
+  if(PA.nowKey===key) return;                    // skip the DOM churn when the chord hasn't changed
+  PA.nowKey=key;
+  document.getElementById('pa-chordnow').innerHTML=fmtMusic(chordSymOne(b.root,b.q));
+  const degs=QUAL[b.q].degs;
+  const tEl=document.getElementById('pa-tones'); tEl.innerHTML='';
+  QUAL[b.q].ints.forEach((s,i)=>{ const c=document.createElement('div'); c.className='ct';
+    c.innerHTML=fmtMusic(noteName(b.root+s,degs[i],rootName,us))+' <b>'+fmtMusic(degs[i])+'</b>'; tEl.appendChild(c); });
+  const scaleName = b.scale || QUAL[b.q].scale;   // per-bar override wins (e.g. altered V7 in minor)
+  document.getElementById('pa-scale').innerHTML=fmtMusic(scaleName+'  ('+rootName+')');
+  const sdegs=scaleDegs(scaleName);
+  const sn=document.getElementById('pa-scalenotes'); sn.innerHTML='';
+  SCALES[scaleName].ints.forEach((s,i)=>{ const el=document.createElement('div'); el.className='notebtn';
+    el.innerHTML='<div class="nm">'+fmtMusic(noteName(b.root+s,sdegs[i],rootName,us))+'</div><div class="dg">'+fmtMusic(sdegs[i])+'</div>';
+    makeKeyActivated(el, ()=>playTone(rootMidiFor(b.root,4)+s,null,0.4,{voice:'vibes',gain:0.20}));
+    sn.appendChild(el); });
+}
+
+/* ---------- Rhythmic variation engine ---------- */
+// Comping rhythms as onsets over 8 eighth-note slots per bar
+// slot map: 0=beat1, 1=&, 2=beat2, 3=&, 4=beat3, 5=&, 6=beat4, 7=&
+const COMP_POOL = {
+  sparse:[ [0],[4],[3],[6],[1],[0,4] ],
+  medium:[ [0,3],[1,4],[3,6],[2,5],[0,4],[3,7],[1,5],[0,6],[4,7] ],   // Charleston, reverse, off-beats, anticipations
+  busy:[ [0,3,5],[1,4,6],[0,3,6],[2,5,7],[1,3,6],[0,2,5],[3,5,7],[0,3,5,7] ]
+};
+let compLast=-1;
+function pickComp(density){
+  const pool=COMP_POOL[density]||COMP_POOL.medium;
+  let i=Math.floor(Math.random()*pool.length);
+  if(i===compLast && pool.length>1) i=(i+1)%pool.length;
+  compLast=i; return pool[i];
+}
+// midi for a pitch-class nearest a reference midi (keeps bass lines smooth)
+function nearestOct(pc, ref){ pc=((pc%12)+12)%12; return pc + 12*Math.round((ref-pc)/12); }
+function clampBass(m){ while(m>54) m-=12; while(m<31) m+=12; return m; }
+// Rootless guide-tone voicing (3rd, 5th, 7th) with an occasional 9th on top, kept in a tidy register.
+function compVoicing(root,q,scale){
+  const ints=QUAL[q].ints; let base=rootMidiFor(root,4);
+  while(base<58) base+=12; while(base>69) base-=12;          // transpose the whole chord, not single notes,
+  const alt = scale===ALT;                                   // so the internal intervals stay intact
+  // On an altered bar the natural 5 and 9 fight the b9/#9/b13 the panel is telling you to play,
+  // so voice the b13 in place of the 5 and the b9 in place of the 9.
+  const v=[base+ints[1], base+(alt?8:ints[2]), base+ints[3]];
+  if(q!=='m7b5' && Math.random()<0.55) v.push(base+(alt?13:14));
+  return v;
+}
+// a walking-bass bar: 4 quarter notes approaching the next root (handles split bars)
+function walkingBar(bar,nextFirstRoot){
+  const c1=barChord(bar,0), i1=QUAL[c1.q].ints, ref=44;
+  const b1=clampBass(nearestOct(c1.root, ref));
+  if(barIsSplit(bar)){
+    const c2=barChord(bar,2);
+    const b2=clampBass(nearestOct((c2.root+(Math.random()<0.5?1:-1)+12)%12, b1)); // approach chord 2
+    const b3=clampBass(nearestOct(c2.root, b2));                                   // chord 2 root
+    const b4=clampBass(nearestOct((nextFirstRoot+(Math.random()<0.5?1:-1)+12)%12, b3));
+    return [b1,b2,b3,b4];
+  }
+  // beat 2 takes the 3rd or the 5th; beat 3 takes whichever of the two beat 2 did NOT use,
+  // so the line always moves instead of repeating the same note twice.
+  const useThirdOn2 = Math.random()<0.5;
+  const d2 = useThirdOn2? i1[1] : i1[2];
+  const d3 = useThirdOn2? i1[2] : i1[1];
+  const b2=clampBass(nearestOct((c1.root+d2)%12, b1));
+  const b3=clampBass(nearestOct((c1.root+d3)%12, b2));
+  let dir = Math.random()<0.5?1:-1;
+  let b4=clampBass(nearestOct((nextFirstRoot+dir+12)%12, b3));                       // approach to next root
+  if(b4===b3) b4=clampBass(nearestOct((nextFirstRoot-dir+12)%12, b3));               // never repeat beat 3
+  return [b1,b2,b3,b4];
+}
+
+function schedBeat(barIdx, beat, time){
+  const bar=PA.bars[barIdx]; if(!bar) return;
+  const spb=60/PA.tempo;
+  const swingOff = PA.swing? spb*(2/3) : spb*0.5;
+  const nb = PA.bars[(barIdx+1)%PA.bars.length];
+  const nextFirstRoot = barChord(nb,0).root;
+  const split = barIsSplit(bar);
+  const lastOfForm = (barIdx===PA.bars.length-1);
+  const hum=()=> (Math.random()-0.5)*0.006;   // tiny timing humanization
+
+  // choose per-bar patterns once, at the downbeat
+  if(beat===0){
+    PA.walk=walkingBar(bar,nextFirstRoot);
+    PA.comp=pickComp(document.getElementById('pa-density').value);
+    PA.twoFeel = !split && Math.random()<0.16;  // occasional half-time "two feel" bar (not on fast-changing bars)
+    const c1=barChord(bar,0), c2=barChord(bar,2), cn=barChord(nb,0);
+    PA.voice=compVoicing(c1.root,c1.q,c1.scale);
+    PA.voice2= split? compVoicing(c2.root,c2.q,c2.scale) : PA.voice;
+    PA.voiceNext=compVoicing(cn.root,cn.q,cn.scale);
+  }
+  const activeVoice = (beat>=2)? PA.voice2 : PA.voice;
+
+  // ---------- DRUMS: authentic ride pattern + comping accents ----------
+  if(document.getElementById('pa-drums').checked){
+    // ride pattern: accented on 1 and 3, lighter skip notes on the swung "and" of 2 and 4
+    rideHit(time+hum(), {gain:(beat===0||beat===2?0.058:0.046)+Math.random()*0.012, decay:0.85+Math.random()*0.3});
+    if(beat===1||beat===3){                                              // "spang-a-lang" skip note
+      rideHit(time+swingOff+hum(), {gain:0.033+Math.random()*0.009, decay:0.5});
+      noiseBurst(time,0.035,{type:'highpass',freq:9000,gain:0.055,wet:0.05}); // hi-hat foot on 2 & 4
+    }
+    if(Math.random()<0.22){ kick(time+(Math.random()<0.5?swingOff:0)); }        // dropped "bombs"
+    if(Math.random()<0.16){                                                     // brushed snare comp
+      noiseBurst(time+swingOff,0.10,{type:'bandpass',freq:2300,Q:0.8,gain:0.085,attack:0.008});
+    }
+    if(lastOfForm && beat===3){                                          // turnaround fill
+      noiseBurst(time,0.07,{type:'bandpass',freq:2500,Q:0.9,gain:0.085});
+      noiseBurst(time+spb*0.5,0.07,{type:'bandpass',freq:2100,Q:0.9,gain:0.095});
+      noiseBurst(time+spb*0.75,0.07,{type:'bandpass',freq:3000,Q:0.9,gain:0.085});
+    }
+  }
+
+  // ---------- BASS: walking, with skips and occasional two-feel ----------
+  if(document.getElementById('pa-bass').checked){
+    if(PA.twoFeel){
+      if(beat===0||beat===2) playTone(PA.walk[beat], time, spb*1.6, {voice:'bass',gain:0.175});
+    } else {
+      playTone(PA.walk[beat], time+hum(), spb*0.80, {voice:'bass',gain:0.165});
+      if(beat===3 && Math.random()<0.3){                                 // eighth-note pickup into the next bar
+        const target=nearestOct(nextFirstRoot, PA.walk[3]);
+        const pass=PA.walk[3] + (target>PA.walk[3]?1:-1);
+        playTone(clampBass(pass), time+swingOff, spb*0.38, {voice:'bass',gain:0.13});
+      }
+    }
+  }
+
+  // ---------- COMPING: rotating rhythm from the pattern pool ----------
+  if(document.getElementById('pa-chords').checked){
+    if(PA.twoFeel){
+      if(beat===0) playChordTones(PA.voice, time, spb*1.5, {gain:0.055});
+    } else {
+      const dbSlot=2*beat, andSlot=2*beat+1;
+      if(PA.comp.includes(dbSlot)) playChordTones(activeVoice, time+hum(), spb*0.85, {gain:0.060});
+      if(PA.comp.includes(andSlot)){
+        const anticip = (andSlot===7);                                   // 'and' of 4 anticipates the next chord
+        playChordTones(anticip?PA.voiceNext:activeVoice, time+swingOff+hum(), spb*0.65, {gain:0.053});
+      }
+    }
+  }
+}
+
+function scheduler(){
+  const ctx=ac(); const spb=60/PA.tempo;
+  // If the tab was backgrounded, setInterval stalls while audio time marches on. Without this
+  // guard the catch-up loop would dump every missed beat into the past and fire them at once.
+  if(PA.nextTime < ctx.currentTime){ PA.nextTime = ctx.currentTime + 0.05; }
+  while(PA.nextTime < ctx.currentTime + PA.lookahead + 0.1){
+    schedBeat(PA.bar, PA.beat, PA.nextTime);
+    // UI update slightly ahead; `gen` guards against a form change landing mid-flight
+    const uiBar=PA.bar, uiBeat=PA.beat, gen=PA.gen;
+    const delay=(PA.nextTime-ctx.currentTime)*1000;
+    if(uiBeat===0){ setTimeout(()=>{ if(PA.playing&&gen===PA.gen){ highlightBar(uiBar); updateNowPlaying(uiBar,0);} }, Math.max(0,delay)); }
+    else if(uiBeat===2 && barIsSplit(PA.bars[uiBar])){ setTimeout(()=>{ if(PA.playing&&gen===PA.gen) updateNowPlaying(uiBar,1); }, Math.max(0,delay)); }
+    PA.nextTime += spb;
+    PA.beat++;
+    if(PA.beat>=4){ PA.beat=0; PA.bar=(PA.bar+1)%PA.bars.length; }
+  }
+}
+function highlightBar(i){
+  document.querySelectorAll('#pa-bars .bar').forEach(x=>x.classList.remove('now'));
+  const el=document.getElementById('pabar'+i);
+  if(el){
+    el.classList.add('now');
+    const r=el.getBoundingClientRect();          // keep the current bar visible on long forms
+    if(r.top<60 || r.bottom>window.innerHeight-40) el.scrollIntoView({block:'center',behavior:'smooth'});
+  }
+  const pos=document.getElementById('pa-formpos');
+  if(pos) pos.textContent='bar '+(i+1)+' of '+PA.bars.length;
+}
+function paStart(){
+  const ctx=ac();
+  PA.playing=true; PA.beat=0; PA.nextTime=ctx.currentTime+0.12;
+  if(MASTER){ MASTER.gain.cancelScheduledValues(ctx.currentTime); MASTER.gain.setValueAtTime(PA.vol!=null?PA.vol:1,ctx.currentTime); }
+  document.getElementById('pa-toggle').textContent='⏸ Stop';
+  clearInterval(PA.timer);
+  PA.timer=setInterval(scheduler,25);
+}
+function paStop(){
+  PA.playing=false; clearInterval(PA.timer); PA.timer=null;
+  // Silence anything already scheduled inside the lookahead window instead of letting it ring on.
+  if(AC&&MASTER){
+    const t=AC.currentTime;
+    MASTER.gain.cancelScheduledValues(t);
+    MASTER.gain.setValueAtTime(MASTER.gain.value,t);
+    MASTER.gain.linearRampToValueAtTime(0.0001,t+0.06);
+    setTimeout(()=>{ if(!PA.playing&&MASTER) MASTER.gain.setValueAtTime(PA.vol!=null?PA.vol:1,AC.currentTime); },140);
+  }
+  document.getElementById('pa-toggle').textContent='▶ Play';
+}
+document.getElementById('pa-toggle').onclick=()=>{ PA.playing? paStop():paStart(); };
+document.getElementById('pa-tempo').oninput=e=>{ PA.tempo=parseInt(e.target.value);
+  document.getElementById('pa-tempolabel').textContent=PA.tempo+' bpm'; };
+document.getElementById('pa-swing').onchange=e=>{ PA.swing=parseInt(e.target.value); };
+document.getElementById('pa-vol').oninput=e=>{
+  PA.vol=parseInt(e.target.value)/100;
+  if(MASTER && PA.playing) MASTER.gain.setTargetAtTime(PA.vol, AC.currentTime, 0.02);
+};
+// Switching tunes mid-practice should hand you the new form still playing, not silence.
+document.getElementById('pa-prog').onchange=()=>{
+  const wasPlaying=PA.playing;
+  if(wasPlaying) paStop();
+  paBuild();
+  if(wasPlaying) setTimeout(paStart,80);
+};
+paBuild();
+
+/* =========================================================================
+   MASTERS & STANDARDS
+   ========================================================================= */
+const INSTR_CENTER={trumpet:72,'alto sax':69,'tenor sax':61,piano:64,bass:45,voice:62,guitar:60};
+function playRange(instr){
+  const c=INSTR_CENTER[instr]||64; const ctx=ac(); let t=ctx.currentTime+0.03;
+  [0,4,7,12].forEach(s=>{ playTone(c+s,t,0.28,{voice:(instr==='bass'?'bass':(instr==='piano'?'keys':'vibes')),gain:0.18}); t+=0.16; });
+}
+const MASTERS=[
+  {n:'Louis Armstrong',i:'trumpet',e:'1920s–70s',l:'The first great soloist — he turned jazz from ensemble music into an art of individual voices. Listen for joyous swing, singing melodic phrases, and pure storytelling.'},
+  {n:'Big Joe Turner',i:'voice',e:'1930s–80s',l:'The blues-shouting roots underneath all of jazz. Listen for the shuffle, the call-and-response, and raw blues feeling — the soil everything else grew from.'},
+  {n:'Charlie Parker',i:'alto sax',e:'bebop',l:'“Bird” — the bebop bible. Listen for blazing eighth-note lines, chromatic enclosures around chord tones, and how deeply the blues runs through even the fastest playing.'},
+  {n:'Dizzy Gillespie',i:'trumpet',e:'bebop · Afro-Cuban',l:'Bebop’s co-architect. Listen for harmonic daring, high-register fire, playful rhythm, and the birth of Latin jazz.'},
+  {n:'Thelonious Monk',i:'piano',e:'1940s–70s',l:'Angular, percussive, full of space and “wrong” notes that land exactly right. Listen for rhythm and silence as much as for the notes themselves.'},
+  {n:'Charles Mingus',i:'bass',e:'1940s–70s',l:'Bassist and composer of gospel-and-blues fire. Listen for collective improvisation, huge dynamic swings, and music that breathes and shouts.'},
+  {n:'Miles Davis',i:'trumpet',e:'1940s–90s',l:'The master of space and reinvention. Listen for how few notes he needs and the lyricism of each one — and how he pioneered modal jazz (So What).'},
+  {n:'John Coltrane',i:'tenor sax',e:'tenor/soprano · 1950s–60s',l:'From “sheets of sound” to modal jazz to the Giant Steps matrix to spiritual freedom. Listen for relentless exploration, intensity, and harmonic depth.'},
+  {n:'Stan Getz',i:'tenor sax',e:'1940s–90s',l:'“The Sound.” Listen for a gorgeous, breathy tone and effortless, lyrical phrasing — and how he brought bossa nova to the world.'},
+  {n:'Doc Severinsen',i:'trumpet',e:'big band',l:'Big-band virtuosity and showmanship. Listen for brilliant tone, dazzling range, and total command of the horn.'},
+  {n:'Maynard Ferguson',i:'trumpet',e:'big band',l:'Stratospheric high-note power. Listen for screaming lead lines and the sheer excitement of a big band at full tilt.'},
+  {n:'Chick Corea',i:'piano',e:'fusion · Latin · post-bop',l:'Fusion, Latin and acoustic post-bop brilliance. Listen for crystalline lines, Spanish colors, and endlessly inventive rhythmic play.'},
+  {n:'Arturo Sandoval',i:'trumpet',e:'Afro-Cuban',l:'Afro-Cuban fire with jaw-dropping range. Listen for virtuosity married to bebop vocabulary and Latin rhythm.'}
+];
+function renderMasters(){
+  const box=document.getElementById('masters-list'); box.innerHTML='';
+  MASTERS.forEach(m=>{
+    const d=document.createElement('div'); d.style.cssText='border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:8px 0;background:var(--panel2)';
+    d.innerHTML='<div class="row" style="justify-content:space-between"><b style="font-size:16px;color:var(--accent);cursor:pointer" class="mname">'+m.n+'</b>'+
+      '<span class="pill">'+m.i+' · '+m.e+'</span></div><div style="color:#d3dae2;margin-top:6px;font-size:14px">'+m.l+'</div>';
+    makeKeyActivated(d.querySelector('.mname'), ()=>playRange(m.i));
+    box.appendChild(d);
+  });
+  const more=document.createElement('div'); more.className='hint'; more.style.marginTop='12px';
+  more.innerHTML='…and so many more to explore: Ella Fitzgerald, Duke Ellington, Count Basie, Sarah Vaughan, Bill Evans, Sonny Rollins, Wes Montgomery, Herbie Hancock, Sonny Stitt, Clifford Brown, Freddie Hubbard, Oscar Peterson, and Wynton Marsalis. Pick one a week and transcribe a single phrase.';
+  box.appendChild(more);
+}
+const STANDARDS=[
+  {n:'So What',c:'Miles Davis',k:'D Dorian',f:'32-bar AABA (modal)',t:'Modal soloing and the power of space — two chords, endless room.',p:'sowhat'},
+  {n:'Blue Bossa',c:'Kenny Dorham',k:'C minor',f:'16 bars',t:'Minor ii–V–i, a key change, and Latin feel — a perfect first standard.',p:'bluebossa'},
+  {n:'Take the A Train',c:'Billy Strayhorn',k:'C major',f:'32-bar AABA',t:'Ellington’s theme song, written by Strayhorn. Clean changes and the famous D7(#11) — the “wrong note” that defines the tune.',p:'atrain'},
+  {n:'Rhythm Changes (from “I Got Rhythm”)',c:'George Gershwin',k:'played in B♭ · 32-bar AABA',f:'original: D♭, 34 bars',t:'Fast-moving ii–Vs with a dominant-cycle bridge — the bebop proving ground (Anthropology, Oleo & hundreds more).',p:'rhythmFull'},
+  {n:'Autumn Leaves',c:'Joseph Kosma',k:'G minor / B♭',f:'32 bars',t:'Major and minor ii–V–I side by side — the essential ii–V workout.',p:'autumn'},
+  {n:'Blues (Now’s the Time / Billie’s Bounce)',c:'Charlie Parker',k:'F',f:'12-bar blues',t:'The foundation of the whole language — feel plus chord tones.',p:'bluesF'},
+  {n:'Giant Steps',c:'John Coltrane',k:'B major',f:'16 bars',t:'The major-third matrix — the ultimate changes-running challenge. (▶ plays the same cycle transposed to C.)',p:'coltrane'},
+  {n:'All the Things You Are',c:'Jerome Kern',k:'A♭ major',f:'36 bars',t:'Key centers cycling by fourths — a masterclass in guide-tone voice leading.',p:null}
+];
+function renderStandards(){
+  const box=document.getElementById('standards-list'); box.innerHTML='';
+  STANDARDS.forEach(s=>{
+    const d=document.createElement('div'); d.style.cssText='border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:8px 0;background:var(--panel2)';
+    const playBtn = s.p? '<button class="btn" style="padding:6px 12px">▶ Play</button>' : '<span class="pill">study / by ear</span>';
+    d.innerHTML='<div class="row" style="justify-content:space-between"><div><b style="font-size:16px">'+s.n+'</b> <span class="muted">— '+s.c+'</span></div><span class="pdt"></span></div>'+
+      '<div class="row" style="gap:14px;margin-top:6px"><span class="pill">'+fmtMusic(s.k)+'</span><span class="pill">'+fmtMusic(s.f)+'</span></div>'+
+      '<div style="color:#d3dae2;margin-top:6px;font-size:14px">'+fmtMusic(s.t)+'</div>';
+    const slot=d.querySelector('.pdt'); slot.innerHTML=playBtn;
+    if(s.p){ slot.querySelector('button').onclick=()=>loadStandard(s.p); }
+    box.appendChild(d);
+  });
+}
+function loadStandard(progKey){
+  document.querySelectorAll('#nav button').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  document.querySelector('#nav button[data-tab="play"]').classList.add('active');
+  document.getElementById('tab-play').classList.add('active');
+  window.scrollTo({top:0,behavior:'smooth'});
+  const sel=document.getElementById('pa-prog'); sel.value=progKey;
+  const wasPlaying=PA.playing;
+  if(wasPlaying) paStop();
+  paBuild();
+  setTimeout(paStart, wasPlaying?90:0);
+}
+renderMasters(); renderStandards();
+
+/* ---- Render accidentals in the static prose, and pull in a music font if available ---- */
+['tab-learn','tab-masters','tab-theory','tab-practice','tab-ear','tab-play'].forEach(id=>{
+  const el=document.getElementById(id);
+  if(!el) return;
+  // only the descriptive copy; generated regions are formatted by their own render functions
+  el.querySelectorAll('p, li, summary, .hint, .pill, h2, h3').forEach(fmtStaticProse);
+});
+(function loadMusicFont(){
+  try{
+    const l=document.createElement('link');
+    l.rel='stylesheet';
+    l.href='https://fonts.googleapis.com/css2?family=Noto+Music&display=swap';
+    l.onerror=()=>l.remove();          // offline: the CSS fallback stack takes over
+    document.head.appendChild(l);
+  }catch(e){}
+})();
+
+/* ---- High-quality sounds toggle ---- */
+document.getElementById('sf-toggle').addEventListener('change', e=>{
+  const wrap=document.querySelector('.sftoggle');
+  if(e.target.checked){
+    wrap.classList.add('on');
+    ac();                                   // this is a user gesture: unlock audio first
+    if(SF.ready){ SF.on=true; sfStatus('Real piano, bass & vibes (drums stay synth)','ok'); }
+    else sfEnable();
+  } else {
+    wrap.classList.remove('on');
+    SF.on=false;
+    sfStatus(SF.ready? 'Using built-in synth' : '');
+  }
+});
+
+/* Audio unlock / recovery. iOS re-suspends the context after a call or backgrounding, so this
+   must keep listening rather than firing once. */
+['click','touchend','keydown'].forEach(ev=>
+  document.addEventListener(ev, ()=>{ if(!AC || AC.state==='suspended') ac(); }, {passive:true}));
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState==='visible' && AC && AC.state==='suspended') AC.resume().catch(()=>{});
+  // Re-anchor the transport so a backgrounded tab doesn't try to replay missed beats.
+  if(document.visibilityState==='visible' && PA.playing && AC) PA.nextTime = AC.currentTime + 0.08;
+});
+</script>
+</body>
+</html>

@@ -56,6 +56,9 @@ enum Tab {
 const SAMPLE_RATE: f32 = 44_100.0;
 
 fn main() {
+    #[cfg(target_arch = "wasm32")]
+    console_error_panic_hook::set_once();
+
     let progs = progression::all();
     let bars = progs[0].bars.clone();
 
@@ -68,14 +71,18 @@ fn main() {
         rng: Rng::new(0xC0FFEE),
     }));
 
-    // Audio output lives for the whole process; dropping the stream would stop it.
-    let _stream = start_audio(shared.clone());
-
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "The Jazz Improvisation Lab".into(),
-                resolution: (1040.0, 780.0).into(),
+                resolution: (1040, 780).into(),
+                // On the web, Bevy attaches to this canvas and follows its size.
+                #[cfg(target_arch = "wasm32")]
+                canvas: Some("#jazz-canvas".into()),
+                #[cfg(target_arch = "wasm32")]
+                fit_canvas_to_parent: true,
+                #[cfg(target_arch = "wasm32")]
+                prevent_default_event_handling: false,
                 ..default()
             }),
             ..default()
@@ -93,14 +100,42 @@ fn main() {
             volume: 1.0,
         })
         .insert_resource(ClearColor(Color::srgb(0.06, 0.07, 0.09)))
+        .init_non_send::<AudioStream>()
         .add_systems(Startup, setup_camera)
-        .add_systems(Update, keep_audio_fed)
+        .add_systems(Update, (start_audio_on_first_interaction, keep_audio_fed).chain())
         .add_systems(EguiPrimaryContextPass, ui)
         .run();
 }
 
 fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2d);
+}
+
+/// The live output stream. `cpal::Stream` is `!Send`, and on the web the audio
+/// context may not be created before a user gesture, so it is a non-send resource
+/// opened lazily rather than at start-up.
+#[derive(Default)]
+struct AudioStream(Option<cpal::Stream>);
+
+/// Browsers block audio until the user interacts with the page, so the stream is
+/// opened on the first click or key press. Native behaves identically, which keeps
+/// one code path for both.
+fn start_audio_on_first_interaction(
+    mut stream: NonSendMut<AudioStream>,
+    audio: Res<Audio>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    keys: Res<ButtonInput<KeyCode>>,
+    touches: Res<Touches>,
+) {
+    if stream.0.is_some() {
+        return;
+    }
+    let interacted = buttons.get_just_pressed().next().is_some()
+        || keys.get_just_pressed().next().is_some()
+        || touches.iter_just_pressed().next().is_some();
+    if interacted {
+        stream.0 = start_audio(audio.0.clone());
+    }
 }
 
 /// Top up the scheduler so there is always at least a bar of music queued ahead.
@@ -125,8 +160,19 @@ fn ui(mut contexts: EguiContexts, mut state: ResMut<AppState>, audio: Res<Audio>
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
+    let ctx = ctx.clone();
 
-    egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
+    // egui 0.35 draws panels into a root `Ui` covering the viewport rather than
+    // straight into the context.
+    let mut root = egui::Ui::new(
+        ctx.clone(),
+        "root".into(),
+        egui::UiBuilder::new()
+            .layer_id(egui::LayerId::background())
+            .max_rect(ctx.viewport_rect()),
+    );
+
+    egui::Panel::top("tabs").show(&mut root, |ui| {
         ui.horizontal(|ui| {
             ui.heading("The Jazz Improvisation Lab");
             ui.separator();
@@ -136,7 +182,7 @@ fn ui(mut contexts: EguiContexts, mut state: ResMut<AppState>, audio: Res<Audio>
         });
     });
 
-    egui::CentralPanel::default().show(ctx, |ui| match state.tab {
+    egui::CentralPanel::default().show(&mut root, |ui| match state.tab {
         Tab::PlayAlong => play_along_ui(ui, &mut state, &audio),
         Tab::Theory => theory_ui(ui, &mut state),
         Tab::Drills => drills_ui(ui, &mut state),

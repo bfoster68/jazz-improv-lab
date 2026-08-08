@@ -189,6 +189,7 @@ pub fn soft_clip(x: f32) -> f32 {
 mod tests {
     use super::*;
     use engine::{plan_bar, Density, Rng, Settings};
+    use voice::Instrument;
     use jazz_theory::progression;
 
     fn peak(v: &[f32]) -> f32 {

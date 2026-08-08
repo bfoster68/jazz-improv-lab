@@ -74,7 +74,8 @@ tests-web/                Playwright suites for the browser app
 ```bash
 # Rust
 cd rust
-cargo test --workspace                 # 92 tests, all offline, no audio device needed
+cargo test -p jazz-theory -p jazz-audio   # 92 tests, ~1s, no audio device needed
+cargo check --workspace                  # includes the Bevy app
 cargo run -p jazz-audio --bin render-wav -- --list
 cargo run -p jazz-audio --bin render-wav -- bluebossa --tempo 150   # hear the engine
 cargo run -p jazz-app --release        # the native app

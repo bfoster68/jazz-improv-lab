@@ -110,3 +110,13 @@ The browser suites need Playwright and drive a real Chromium instance.
 
 MIT OR Apache-2.0. Standards are included as chord changes only — the harmony a
 fake book teaches — not as melodies.
+
+## Verified state
+
+- `jazz-theory` — 60 tests
+- `jazz-audio` — 30 tests + 2 doc tests
+- `jazz-app` — compiles clean against Bevy 0.19 / bevy_egui 0.41 / egui 0.35
+
+Note that `cargo test --workspace` will link the whole Bevy binary and take a
+while; `cargo test -p jazz-theory -p jazz-audio` runs the musical test suite in
+about a second.

@@ -3418,9 +3418,11 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_egui",
+ "console_error_panic_hook",
  "cpal 0.16.0",
  "jazz-audio",
  "jazz-theory",
+ "wasm-bindgen",
 ]
 
 [[package]]
