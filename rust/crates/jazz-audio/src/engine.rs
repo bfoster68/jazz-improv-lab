@@ -81,6 +81,11 @@ impl Rng {
         self.0 = x;
         (x.wrapping_mul(0x2545F4914F6CDD1D) >> 32) as u32
     }
+    /// Raw draw, for callers that need to feed randomness into a pure function.
+    #[inline]
+    pub fn next_u32_pub(&mut self) -> u32 {
+        self.next_u32()
+    }
     #[inline]
     pub fn next_f32(&mut self) -> f32 {
         self.next_u32() as f32 / u32::MAX as f32

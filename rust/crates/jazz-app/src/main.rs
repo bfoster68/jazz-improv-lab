@@ -17,7 +17,10 @@ use jazz_audio::Mixer;
 use jazz_theory::drill::{self, DRILL_IDS};
 use jazz_theory::harmony::{render_scale, find_scale, SCALES};
 use jazz_theory::note::{pc_name, use_sharp_for_root};
+use jazz_theory::ear::{self, Mode as EarMode, Question};
+use jazz_theory::listening::{ALSO_EXPLORE, MASTERS, STANDARDS};
 use jazz_theory::progression::{self, Bar, Progression};
+use jazz_audio::voice::Instrument;
 
 /// Shared audio state. The Bevy side schedules bars into it; the cpal callback
 /// drains samples from it.
@@ -44,6 +47,9 @@ struct AppState {
     scale_root: i32,
     tab: Tab,
     volume: f32,
+    ear_mode: EarMode,
+    ear: EarState,
+    rng: Rng,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -51,6 +57,18 @@ enum Tab {
     PlayAlong,
     Theory,
     Drills,
+    Ear,
+    Listening,
+}
+
+#[derive(Default)]
+struct EarState {
+    current: Option<Question>,
+    /// What the student chose for the current question, if they have answered.
+    picked: Option<String>,
+    score: u32,
+    streak: u32,
+    total: u32,
 }
 
 const SAMPLE_RATE: f32 = 44_100.0;
@@ -98,6 +116,9 @@ fn main() {
             scale_root: 0,
             tab: Tab::PlayAlong,
             volume: 1.0,
+            ear_mode: EarMode::Intervals,
+            ear: EarState::default(),
+            rng: Rng::new(0x51EED),
         })
         .insert_resource(ClearColor(Color::srgb(0.06, 0.07, 0.09)))
         .init_non_send::<AudioStream>()
@@ -179,13 +200,17 @@ fn ui(mut contexts: EguiContexts, mut state: ResMut<AppState>, audio: Res<Audio>
             ui.selectable_value(&mut state.tab, Tab::PlayAlong, "Play-Along");
             ui.selectable_value(&mut state.tab, Tab::Theory, "Theory");
             ui.selectable_value(&mut state.tab, Tab::Drills, "Drills");
+            ui.selectable_value(&mut state.tab, Tab::Ear, "Ear Training");
+            ui.selectable_value(&mut state.tab, Tab::Listening, "Masters & Standards");
         });
     });
 
     egui::CentralPanel::default().show(&mut root, |ui| match state.tab {
         Tab::PlayAlong => play_along_ui(ui, &mut state, &audio),
-        Tab::Theory => theory_ui(ui, &mut state),
-        Tab::Drills => drills_ui(ui, &mut state),
+        Tab::Theory => theory_ui(ui, &mut state, &audio),
+        Tab::Drills => drills_ui(ui, &mut state, &audio),
+        Tab::Ear => ear_ui(ui, &mut state, &audio),
+        Tab::Listening => listening_ui(ui, &mut state, &audio),
     });
 }
 
@@ -288,7 +313,7 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     });
 }
 
-fn theory_ui(ui: &mut egui::Ui, state: &mut AppState) {
+fn theory_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     ui.horizontal(|ui| {
         egui::ComboBox::from_label("Root")
             .selected_text(pc_name(state.scale_root, use_sharp_for_root(state.scale_root)))
@@ -308,14 +333,41 @@ fn theory_ui(ui: &mut egui::Ui, state: &mut AppState) {
     ui.separator();
     let scale = &SCALES[state.scale_index];
     let notes = render_scale(scale, state.scale_root, use_sharp_for_root(state.scale_root));
+    let root_midi = jazz_theory::note::midi_for(state.scale_root, 4);
     ui.horizontal_wrapped(|ui| {
         for n in &notes {
-            ui.group(|ui| {
+            let cell = ui.group(|ui| {
                 ui.vertical_centered(|ui| {
                     ui.label(egui::RichText::new(&n.name).size(20.0).strong());
                     ui.label(egui::RichText::new(&n.degree).weak());
                 });
             });
+            // clicking a note sounds it, the same as the browser version
+            if cell.response.interact(egui::Sense::click()).clicked() {
+                audio.0.lock().unwrap().mixer.play_note(
+                    Instrument::Vibes,
+                    root_midi + n.semitones,
+                    0.20,
+                    0.50,
+                    0.0,
+                );
+            }
+        }
+    });
+
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        if ui.button("\u{25B6} Play ascending").clicked() {
+            let mut s = audio.0.lock().unwrap();
+            for (i, n) in notes.iter().enumerate() {
+                s.mixer.play_note(Instrument::Vibes, root_midi + n.semitones, 0.20, 0.30, i as f32 * 0.34);
+            }
+            // top off with the octave so the scale resolves
+            s.mixer.play_note(Instrument::Vibes, root_midi + 12, 0.20, 0.40, notes.len() as f32 * 0.34);
+        }
+        if ui.button("\u{25B6} Play as a chord").clicked() {
+            let midis: Vec<i32> = notes.iter().map(|n| root_midi + n.semitones).collect();
+            audio.0.lock().unwrap().mixer.play_chord(Instrument::Keys, &midis, 0.07, 1.6, 0.0);
         }
     });
     ui.add_space(8.0);
@@ -324,7 +376,7 @@ fn theory_ui(ui: &mut egui::Ui, state: &mut AppState) {
     let _ = find_scale(scale.name);
 }
 
-fn drills_ui(ui: &mut egui::Ui, state: &mut AppState) {
+fn drills_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     ui.horizontal(|ui| {
         egui::ComboBox::from_label("Drill")
             .selected_text(DRILL_IDS[state.drill_index])
@@ -363,8 +415,207 @@ fn drills_ui(ui: &mut egui::Ui, state: &mut AppState) {
             }
         });
         ui.add_space(8.0);
+        if ui.button("\u{25B6} Play the line").clicked() {
+            let mut s = audio.0.lock().unwrap();
+            for (i, n) in d.notes.iter().enumerate() {
+                s.mixer.play_note(Instrument::Vibes, n.midi, 0.20, 0.30, i as f32 * 0.33);
+            }
+        }
+        ui.add_space(6.0);
         ui.label(egui::RichText::new(&d.how).italics());
     }
+}
+
+// ---------------------------------------------------------------- ear training
+
+/// Voice a question through the mixer, using the timing the theory crate specifies.
+fn sound_question(q: &Question, audio: &Audio) {
+    // one slot per beat-ish; intervals want a clear gap, chords ring longer
+    let (slot, dur, gain, instrument) = match q.mode {
+        EarMode::Intervals => (0.62, 0.55, 0.22, Instrument::Vibes),
+        EarMode::Progressions => (1.0, 0.95, 0.08, Instrument::Keys),
+        _ => (1.0, 1.5, 0.085, Instrument::Keys),
+    };
+    let mut s = audio.0.lock().unwrap();
+    for (index, notes) in ear::voicing(q) {
+        let at = 0.05 + index as f32 * slot;
+        s.mixer.play_chord(instrument, &notes, gain, dur, at);
+    }
+}
+
+fn ear_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
+    ui.horizontal(|ui| {
+        let before = state.ear_mode;
+        egui::ComboBox::from_label("Mode")
+            .selected_text(state.ear_mode.label())
+            .show_ui(ui, |ui| {
+                for m in EarMode::ALL {
+                    ui.selectable_value(&mut state.ear_mode, m, m.label());
+                }
+            });
+        if state.ear_mode != before {
+            state.ear.current = None;
+            state.ear.picked = None;
+        }
+
+        let next = ui.button("\u{1F3B2} New question").clicked();
+        if next {
+            let previous = state.ear.current.as_ref().map(|q| q.answer);
+            let q = ear::draw(
+                state.ear_mode,
+                previous,
+                state.rng.next_u32_pub(),
+                state.rng.next_u32_pub(),
+            );
+            sound_question(&q, audio);
+            state.ear.current = Some(q);
+            state.ear.picked = None;
+        }
+        if ui.button("\u{1F501} Replay").clicked() {
+            if let Some(q) = state.ear.current.clone() {
+                sound_question(&q, audio);
+            }
+        }
+    });
+
+    ui.separator();
+
+    let Some(q) = state.ear.current.clone() else {
+        ui.label(
+            "Press \u{201C}New question\u{201D} to begin. Sing the sound back before you answer \u{2014} \
+             naming comes after hearing.",
+        );
+        return;
+    };
+
+    let answered = state.ear.picked.is_some();
+    match state.ear.picked.as_deref() {
+        Some(p) if p == q.answer => {
+            ui.label(
+                egui::RichText::new(format!("\u{2713} Correct \u{2014} {}", q.answer))
+                    .color(egui::Color32::from_rgb(87, 201, 138))
+                    .strong(),
+            );
+        }
+        Some(_) => {
+            ui.label(
+                egui::RichText::new(format!("\u{2717} It was {}", q.answer))
+                    .color(egui::Color32::from_rgb(224, 107, 107))
+                    .strong(),
+            );
+        }
+        None => {
+            ui.label(egui::RichText::new("Listening\u{2026}").weak());
+        }
+    }
+
+    ui.add_space(6.0);
+    ui.horizontal_wrapped(|ui| {
+        for choice in &q.choices {
+            let is_answer = *choice == q.answer;
+            let is_pick = state.ear.picked.as_deref() == Some(*choice);
+            let mut text = egui::RichText::new(*choice);
+            if answered && is_answer {
+                text = text.color(egui::Color32::from_rgb(87, 201, 138)).strong();
+            } else if is_pick {
+                text = text.color(egui::Color32::from_rgb(224, 107, 107));
+            }
+            if ui.add_enabled(!answered, egui::Button::new(text)).clicked() {
+                state.ear.picked = Some((*choice).to_string());
+                state.ear.total += 1;
+                if is_answer {
+                    state.ear.score += 1;
+                    state.ear.streak += 1;
+                } else {
+                    state.ear.streak = 0;
+                }
+            }
+        }
+    });
+
+    ui.add_space(10.0);
+    ui.label(format!(
+        "Score {}   \u{00B7}   Streak {}   \u{00B7}   Asked {}",
+        state.ear.score, state.ear.streak, state.ear.total
+    ));
+}
+
+// ----------------------------------------------------------- masters & standards
+
+fn listening_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        ui.heading("Masters to study");
+        ui.label(
+            egui::RichText::new(
+                "The language is learned by ear. Live with these players, sing along, then \
+                 transcribe a single phrase.",
+            )
+            .weak(),
+        );
+        ui.add_space(6.0);
+        for m in MASTERS {
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(m.name)
+                            .strong()
+                            .color(egui::Color32::from_rgb(224, 166, 60)),
+                    );
+                    ui.label(egui::RichText::new(format!("{} \u{00B7} {}", m.instrument, m.era)).weak());
+                });
+                ui.label(m.listen_for);
+            });
+        }
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(format!("And more to explore: {ALSO_EXPLORE}")).italics().weak());
+
+        ui.add_space(16.0);
+        ui.heading("Essential standards");
+        ui.label(
+            egui::RichText::new(
+                "Learn the melody and the changes, then improvise. Play loads the changes \
+                 straight into the Play-Along tab.",
+            )
+            .weak(),
+        );
+        ui.add_space(6.0);
+
+        let mut load: Option<&'static str> = None;
+        for st in STANDARDS {
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(st.title).strong());
+                    ui.label(egui::RichText::new(format!("\u{2014} {}", st.composer)).weak());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        match st.progression_id {
+                            Some(id) => {
+                                if ui.button("\u{25B6} Play").clicked() {
+                                    load = Some(id);
+                                }
+                            }
+                            None => {
+                                ui.label(egui::RichText::new("study by ear").weak());
+                            }
+                        }
+                    });
+                });
+                ui.label(egui::RichText::new(st.key_and_form).weak());
+                ui.label(st.teaches);
+            });
+        }
+
+        if let Some(id) = load {
+            if let Some(i) = state.progs.iter().position(|p| p.id == id) {
+                state.prog_index = i;
+                let mut s = audio.0.lock().unwrap();
+                s.bars = state.progs[i].bars.clone();
+                s.scheduled_bars = 0;
+                s.mixer.clear();
+                s.playing = true;
+                state.tab = Tab::PlayAlong;
+            }
+        }
+    });
 }
 
 /// Open the default output device and stream from the shared mixer.

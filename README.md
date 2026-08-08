@@ -59,7 +59,7 @@ cargo test --workspace        # 92 tests, all offline
 |---|---|
 | `jazz-theory` | Note spelling by letter arithmetic, scales, chords, progressions, generated drills, ear-training material. No dependencies. |
 | `jazz-audio` | FM electric piano, upright bass, vibraphone, an inharmonic ride cymbal, and a swing scheduler. No audio backend — it renders buffers, so every test runs without a sound card. |
-| `jazz-app` | Bevy + egui front end with live `cpal` output. |
+| `jazz-app` | Bevy + egui front end with live `cpal` output. Five tabs, audio opened on first input so the same code path works natively and in the browser. |
 
 Hear the engine without a UI:
 
@@ -113,9 +113,12 @@ fake book teaches — not as melodies.
 
 ## Verified state
 
-- `jazz-theory` — 60 tests
-- `jazz-audio` — 30 tests + 2 doc tests
-- `jazz-app` — compiles clean against Bevy 0.19 / bevy_egui 0.41 / egui 0.35
+- `jazz-theory` — 76 tests
+- `jazz-audio` — 32 tests + 2 doc tests
+- `jazz-app` — builds and links clean against Bevy 0.19 / bevy_egui 0.41 / egui 0.35
+
+The native app has five tabs: Play-Along, Theory, Drills, Ear Training, and
+Masters & Standards. Standards load their changes straight into the play-along.
 
 Note that `cargo test --workspace` will link the whole Bevy binary and take a
 while; `cargo test -p jazz-theory -p jazz-audio` runs the musical test suite in

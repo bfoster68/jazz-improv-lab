@@ -8,7 +8,7 @@ musical knowledge:
 | Path | What it is | Status |
 |---|---|---|
 | `web/index.html` | The complete app: Learn, Theory Lab, Drills, Ear Training, Play-Along, Masters & Standards. Single self-contained file, works offline. | Done, audited twice |
-| `rust/` | A native Rust port. Tested theory + audio engines, plus a Bevy front end. | Engine done & tested; UI is the current frontier |
+| `rust/` | A native Rust port. Tested theory + audio engines, plus a Bevy front end. | Engine + UI done; 110 tests, links clean |
 | `docs/` | A five-part Word document and the reusable "codification prompt" that generated it. | Done |
 
 **Everything is instrument-agnostic.** Notes, degrees and intervals only — never
@@ -74,7 +74,7 @@ tests-web/                Playwright suites for the browser app
 ```bash
 # Rust
 cd rust
-cargo test -p jazz-theory -p jazz-audio   # 92 tests, ~1s, no audio device needed
+cargo test -p jazz-theory -p jazz-audio   # 110 tests, ~1s, no audio device needed
 cargo check --workspace                  # includes the Bevy app
 cargo run -p jazz-audio --bin render-wav -- --list
 cargo run -p jazz-audio --bin render-wav -- bluebossa --tempo 150   # hear the engine
@@ -108,8 +108,8 @@ cd docs && node build-docx.js
 
 ## Known gaps
 
-- The Bevy app covers Play-Along, Theory and Drills; Ear Training and the Masters
-  reference are web-only so far.
+- The Bevy app now covers Play-Along, Theory, Drills, Ear Training and Masters &
+  Standards. Remaining web-only piece: the Learn tab's written curriculum.
 - The web app's optional high-quality sounds download FluidR3 samples from a CDN;
   the Rust side is synthesis-only.
 - Rust has no soundfont support and no reverb yet (the browser build has a

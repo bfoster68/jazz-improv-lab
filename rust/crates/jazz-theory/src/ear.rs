@@ -70,6 +70,106 @@ pub const PROGRESSIONS: &[EarProgression] = &[
     EarProgression { name: "Coltrane fragment (I-bIII7-bVI)", chords: &[(0, Maj7), (3, Dom7), (8, Maj7)] },
 ];
 
+/// Which pool a question is drawn from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Intervals,
+    Chords,
+    Extended,
+    Progressions,
+}
+
+impl Mode {
+    pub const ALL: [Mode; 4] = [Mode::Intervals, Mode::Chords, Mode::Extended, Mode::Progressions];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Mode::Intervals => "Intervals",
+            Mode::Chords => "Chord qualities",
+            Mode::Extended => "Extended & altered",
+            Mode::Progressions => "Progressions",
+        }
+    }
+
+    /// Every possible answer in this pool, in a stable order.
+    pub fn answers(self) -> Vec<&'static str> {
+        match self {
+            Mode::Intervals => INTERVALS.iter().map(|i| i.name).collect(),
+            Mode::Chords => BASIC_CHORDS.iter().map(|c| c.name).collect(),
+            Mode::Extended => EXTENDED_CHORDS.iter().map(|c| c.name).collect(),
+            Mode::Progressions => PROGRESSIONS.iter().map(|p| p.name).collect(),
+        }
+    }
+}
+
+/// A drawn question: what the answer is, what to offer, and the root to voice it from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Question {
+    pub mode: Mode,
+    pub answer: &'static str,
+    pub choices: Vec<&'static str>,
+    /// MIDI root, wandered so absolute pitch cannot be used as a shortcut.
+    pub root: i32,
+}
+
+/// Draw a question.
+///
+/// Randomness is supplied by the caller so this stays a pure function and can be
+/// tested exhaustively. `previous` is the last answer given in this mode; the draw
+/// never repeats it back to back, because a quiz that can ask the same thing twice
+/// in a row feels broken even when it is technically random.
+pub fn draw(mode: Mode, previous: Option<&str>, r_index: u32, r_root: u32) -> Question {
+    let choices = mode.answers();
+    let n = choices.len();
+    let mut idx = (r_index as usize) % n;
+    if n > 1 && Some(choices[idx]) == previous {
+        idx = (idx + 1 + (r_index as usize) % (n - 1)) % n;
+        if Some(choices[idx]) == previous {
+            idx = (idx + 1) % n;
+        }
+    }
+    Question {
+        mode,
+        answer: choices[idx],
+        choices,
+        root: 55 + (r_root % 10) as i32,
+    }
+}
+
+/// The MIDI notes a question should sound, as (delay-in-slots, pitches) pairs.
+///
+/// Slots are sequential: an interval sounds two notes one after another, a
+/// progression sounds one chord per slot, a single chord sounds in slot 0.
+pub fn voicing(q: &Question) -> Vec<(usize, Vec<i32>)> {
+    match q.mode {
+        Mode::Intervals => INTERVALS
+            .iter()
+            .find(|i| i.name == q.answer)
+            .map(|i| vec![(0, vec![q.root]), (1, vec![q.root + i.semitones])])
+            .unwrap_or_default(),
+        Mode::Chords | Mode::Extended => {
+            let pool = if q.mode == Mode::Chords { BASIC_CHORDS } else { EXTENDED_CHORDS };
+            pool.iter()
+                .find(|c| c.name == q.answer)
+                .map(|c| vec![(0, c.ints.iter().map(|i| q.root + i).collect())])
+                .unwrap_or_default()
+        }
+        Mode::Progressions => PROGRESSIONS
+            .iter()
+            .find(|p| p.name == q.answer)
+            .map(|p| {
+                p.chords
+                    .iter()
+                    .enumerate()
+                    .map(|(n, (off, qual))| {
+                        (n, qual.ints().iter().map(|i| q.root + off + i).collect())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,5 +252,109 @@ mod tests {
         let before = p.len();
         p.dedup();
         assert_eq!(before, p.len(), "duplicate progression name");
+    }
+
+    #[test]
+    fn every_mode_offers_a_non_trivial_pool() {
+        for m in Mode::ALL {
+            let a = m.answers();
+            assert!(a.len() >= 4, "{:?} has only {} answers", m, a.len());
+            assert!(!m.label().is_empty());
+        }
+    }
+
+    #[test]
+    fn a_drawn_answer_is_always_one_of_the_offered_choices() {
+        for m in Mode::ALL {
+            for r in 0..200u32 {
+                let q = draw(m, None, r, r * 7);
+                assert!(q.choices.contains(&q.answer));
+                assert!((55..65).contains(&q.root), "root {} out of range", q.root);
+            }
+        }
+    }
+
+    #[test]
+    fn a_draw_never_repeats_the_previous_answer() {
+        for m in Mode::ALL {
+            let mut previous: Option<&'static str> = None;
+            for r in 0..500u32 {
+                let q = draw(m, previous, r * 13 + 5, r);
+                assert_ne!(
+                    Some(q.answer),
+                    previous,
+                    "{:?} asked the same question twice in a row",
+                    m
+                );
+                previous = Some(q.answer);
+            }
+        }
+    }
+
+    #[test]
+    fn draws_cover_the_whole_pool_rather_than_favouring_a_few() {
+        for m in Mode::ALL {
+            let mut seen = std::collections::HashSet::new();
+            let mut previous = None;
+            for r in 0..600u32 {
+                let q = draw(m, previous, r, r);
+                seen.insert(q.answer);
+                previous = Some(q.answer);
+            }
+            assert_eq!(seen.len(), m.answers().len(), "{:?} never asked some answers", m);
+        }
+    }
+
+    #[test]
+    fn intervals_sound_two_notes_the_right_distance_apart() {
+        for iv in INTERVALS {
+            let q = Question { mode: Mode::Intervals, answer: iv.name, choices: vec![], root: 60 };
+            let v = voicing(&q);
+            assert_eq!(v.len(), 2, "{} should sound two notes", iv.name);
+            assert_eq!(v[0].1[0], 60);
+            assert_eq!(v[1].1[0] - v[0].1[0], iv.semitones, "{} is mis-voiced", iv.name);
+            assert!(v[1].0 > v[0].0, "the second note must come after the first");
+        }
+    }
+
+    #[test]
+    fn chords_sound_all_their_tones_at_once() {
+        for c in BASIC_CHORDS.iter().chain(EXTENDED_CHORDS) {
+            let mode = if BASIC_CHORDS.iter().any(|b| b.name == c.name) {
+                Mode::Chords
+            } else {
+                Mode::Extended
+            };
+            let q = Question { mode, answer: c.name, choices: vec![], root: 60 };
+            let v = voicing(&q);
+            assert_eq!(v.len(), 1, "{} should sound as one simultaneous chord", c.name);
+            assert_eq!(v[0].1.len(), c.ints.len());
+            assert_eq!(v[0].1[0], 60);
+        }
+    }
+
+    #[test]
+    fn progressions_sound_one_chord_per_slot_in_order() {
+        for p in PROGRESSIONS {
+            let q = Question { mode: Mode::Progressions, answer: p.name, choices: vec![], root: 60 };
+            let v = voicing(&q);
+            assert_eq!(v.len(), p.chords.len(), "{} has the wrong chord count", p.name);
+            for (n, (slot, notes)) in v.iter().enumerate() {
+                assert_eq!(*slot, n, "{} plays out of order", p.name);
+                assert!(!notes.is_empty());
+                // the chord must be built on its stated root offset
+                assert_eq!(notes[0], 60 + p.chords[n].0);
+            }
+        }
+    }
+
+    #[test]
+    fn every_answer_in_every_pool_can_actually_be_voiced() {
+        for m in Mode::ALL {
+            for answer in m.answers() {
+                let q = Question { mode: m, answer, choices: vec![], root: 60 };
+                assert!(!voicing(&q).is_empty(), "{answer} produces no sound");
+            }
+        }
     }
 }

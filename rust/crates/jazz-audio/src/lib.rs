@@ -29,7 +29,7 @@ pub mod voice;
 
 use engine::{BarPlan, PercRole};
 use jazz_theory::note::midi_to_freq;
-use voice::{Perc, PercKind, Ride, Voice};
+use voice::{Instrument, Perc, PercKind, Ride, Voice};
 
 /// A scheduled sound waiting for its moment.
 enum Pending {
@@ -103,6 +103,37 @@ impl Mixer {
                     self.pending.push(Pending::Perc(at, Perc::new(PercKind::Kick, p.gain, s)));
                 }
             }
+        }
+    }
+
+    /// Sound a single note `delay` seconds from the play head.
+    ///
+    /// Ear training and note previews need one-off notes rather than a whole bar,
+    /// and going through `BarPlan` for that would be clumsy.
+    pub fn play_note(
+        &mut self,
+        instrument: Instrument,
+        midi: i32,
+        gain: f32,
+        dur: f32,
+        delay: f32,
+    ) {
+        let seed = self.next_seed();
+        let v = Voice::new(instrument, midi_to_freq(midi as f32), gain, dur, seed);
+        self.pending.push(Pending::Note(self.time + delay.max(0.0), v));
+    }
+
+    /// Sound several notes together — a chord for ear training.
+    pub fn play_chord(
+        &mut self,
+        instrument: Instrument,
+        midis: &[i32],
+        gain: f32,
+        dur: f32,
+        delay: f32,
+    ) {
+        for &m in midis {
+            self.play_note(instrument, m, gain, dur, delay);
         }
     }
 
@@ -306,6 +337,27 @@ mod tests {
         assert_eq!(peak(&before), 0.0, "the note sounded early");
         let after = m.render(0.4);
         assert!(peak(&after) > 0.01, "the note never sounded");
+    }
+
+    #[test]
+    fn a_single_note_sounds_after_its_delay() {
+        let mut m = Mixer::new(44_100.0);
+        m.play_note(Instrument::Vibes, 60, 0.5, 0.3, 0.5);
+        assert_eq!(peak(&m.render(0.45)), 0.0, "sounded early");
+        assert!(peak(&m.render(0.4)) > 0.01, "never sounded");
+    }
+
+    #[test]
+    fn a_chord_sounds_all_of_its_notes() {
+        let mut solo = Mixer::new(44_100.0);
+        solo.play_note(Instrument::Keys, 60, 0.2, 0.5, 0.0);
+        let one = rms(&solo.render(1.0));
+
+        let mut chord = Mixer::new(44_100.0);
+        chord.play_chord(Instrument::Keys, &[60, 64, 67, 71], 0.2, 0.5, 0.0);
+        let four = rms(&chord.render(1.0));
+
+        assert!(four > one * 1.5, "a four-note chord should be fuller: {one} vs {four}");
     }
 
     #[test]

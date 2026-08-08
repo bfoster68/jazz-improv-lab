@@ -28,6 +28,7 @@
 pub mod drill;
 pub mod ear;
 pub mod harmony;
+pub mod listening;
 pub mod note;
 pub mod progression;
 
