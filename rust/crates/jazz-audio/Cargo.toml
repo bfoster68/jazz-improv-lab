@@ -1,0 +1,10 @@
+[package]
+name = "jazz-audio"
+description = "Synthesised jazz rhythm section: FM keys, upright bass, vibes, inharmonic ride and a swing scheduler"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+jazz-theory = { path = "../jazz-theory" }

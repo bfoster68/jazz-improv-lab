@@ -1,0 +1,7 @@
+{
+  "name": "jazz-docs",
+  "private": true,
+  "description": "Builds the Jazz Improvisation rules-and-guide Word document",
+  "scripts": { "build": "node build-docx.js" },
+  "dependencies": { "docx": "^9.0.0" }
+}

@@ -1,0 +1,14 @@
+[package]
+name = "jazz-app"
+description = "Native Bevy front end for the Jazz Improvisation Lab"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+jazz-theory = { path = "../jazz-theory" }
+jazz-audio  = { path = "../jazz-audio" }
+bevy = "0.19"
+bevy_egui = "0.41"
+cpal = "0.16"

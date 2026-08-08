@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["crates/jazz-theory", "crates/jazz-audio", "crates/jazz-app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.78"
+license = "MIT OR Apache-2.0"
+
+[profile.dev]
+opt-level = 1          # audio needs some optimisation even in dev
+
+[profile.dev.package."*"]
+opt-level = 3          # but dependencies always fully optimised

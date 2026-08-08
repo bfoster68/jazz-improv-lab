@@ -1,0 +1,9 @@
+[package]
+name = "jazz-theory"
+description = "Instrument-agnostic jazz music theory: spelling, scales, chords, progressions and generated drills"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
