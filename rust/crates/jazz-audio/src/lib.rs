@@ -25,6 +25,9 @@
 #![forbid(unsafe_code)]
 
 pub mod engine;
+#[cfg(feature = "soundfont")]
+pub mod soundfont;
+pub mod stream;
 pub mod voice;
 
 use engine::{BarPlan, PercRole};
@@ -147,6 +150,18 @@ impl Mixer {
 
     pub fn time(&self) -> f32 {
         self.time
+    }
+
+    pub fn sample_rate(&self) -> f32 {
+        self.sample_rate
+    }
+
+    /// Adopt the output device's real rate. Anything already scheduled keeps its
+    /// wall-clock timing because events are stored in seconds, not samples.
+    pub fn set_sample_rate(&mut self, rate: f32) {
+        if rate > 0.0 {
+            self.sample_rate = rate;
+        }
     }
 
     /// How many sounds are currently audible — handy for leak tests.

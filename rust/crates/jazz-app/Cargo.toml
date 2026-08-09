@@ -8,17 +8,26 @@ license.workspace = true
 
 [dependencies]
 jazz-theory = { path = "../jazz-theory" }
-jazz-audio  = { path = "../jazz-audio" }
-bevy = "0.19"
-bevy_egui = "0.41"
+jazz-audio  = { path = "../jazz-audio", features = ["soundfont"] }
+
+# This is a 2D, egui-driven app: no 3D pipeline, no glTF, no gamepads, no sprite
+# animation, and no bevy_audio (cpal drives sound directly). Taking Bevy's default
+# features would drag all of that in, which is most of the dependency tree and most
+# of the wasm payload.
+bevy = { version = "0.19", default-features = false, features = [
+    "bevy_asset",
+    "bevy_core_pipeline",
+    "bevy_render",
+    "bevy_window",
+    "bevy_winit",
+    "multi_threaded",
+    "x11",
+    "webgl2",
+] }
+bevy_egui = { version = "0.41", default-features = false, features = ["render"] }
 cpal = "0.16"
 
-# Browser build: cpal talks to WebAudio, and panics go to the JS console.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 cpal = { version = "0.16", features = ["wasm-bindgen"] }
 console_error_panic_hook = "0.1"
 wasm-bindgen = "0.2"
-
-# wasm needs small, fast output; itch.io has an upload size limit.
-[package.metadata.wasm]
-opt-level = "z"

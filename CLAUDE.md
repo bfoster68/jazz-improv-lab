@@ -74,7 +74,7 @@ tests-web/                Playwright suites for the browser app
 ```bash
 # Rust
 cd rust
-cargo test -p jazz-theory -p jazz-audio   # 118 tests, ~2s, no audio device needed
+cargo test -p jazz-theory -p jazz-audio   # 126 tests, ~2s, no audio device needed
 cargo check --workspace                  # includes the Bevy app
 cargo run -p jazz-audio --bin render-wav -- --list
 cargo run -p jazz-audio --bin render-wav -- bluebossa --tempo 150   # hear the engine
@@ -99,6 +99,15 @@ cd docs && node build-docx.js
   fine in source and were only exposed by extracting actual rendered output. For
   the web app, drive it with Playwright and read `drSequence`; for Rust, assert on
   real note names.
+- **Never lock across the audio boundary.** The audio callback has a hard deadline,
+  so it owns the mixer outright and the UI talks to it through
+  `jazz_audio::stream` — a command channel plus an atomic play head. An earlier
+  design shared a `Mutex`; the UI held it for a whole frame draw while the callback
+  `try_lock`ed and emitted silence on failure, which is what made playback stutter.
+  `stream::tests::a_whole_form_plays_without_dropouts` guards the regression.
+- **Follow the device's sample rate.** `AudioCore::set_sample_rate` is called with
+  the real rate when the stream opens; assuming 44.1 kHz on a 48 kHz device plays
+  everything about a tone sharp.
 - **Audio is testable without a sound card.** `jazz-audio` renders to buffers, so
   every audio test runs offline. Keep it that way — do not add a backend dependency
   to that crate.
@@ -115,7 +124,10 @@ cd docs && node build-docx.js
 - The Learn curriculum is written and tested in `jazz_theory::curriculum` but not
   yet wired into a Bevy tab. `LESSONS` carries level, title, body and an optional
   `TryIt` cross-reference; rendering it is the next step.
-- The web app's optional high-quality sounds download FluidR3 samples from a CDN;
-  the Rust side is synthesis-only.
-- Rust has no soundfont support and no reverb yet (the browser build has a
-  convolution reverb).
+- Both builds can use real samples: the web app streams FluidR3 from a CDN, the
+  Rust app loads any GM `.sf2` from `crates/jazz-app/assets/soundfont.sf2` via
+  `rustysynth` (feature `soundfont`). Neither bundles one.
+- Rust has no reverb yet; the browser build has a convolution reverb.
+- Bevy is built with `default-features = false`. Adding a feature back is fine, but
+  check the crate count and wasm size first — the defaults pull in glTF, gamepads,
+  Bevy's own audio stack and every image codec, none of which this app uses.

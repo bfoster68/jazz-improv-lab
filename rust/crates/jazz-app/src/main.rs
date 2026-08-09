@@ -7,13 +7,11 @@
 //!
 //! Run with `cargo run -p jazz-app --release`.
 
-use std::sync::{Arc, Mutex};
-
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
 
 use jazz_audio::engine::{plan_bar, Density, Rng, Settings};
-use jazz_audio::Mixer;
+use jazz_audio::stream::{AudioCore, AudioHandle};
 use jazz_theory::drill::{self, DRILL_IDS};
 use jazz_theory::harmony::{render_scale, find_scale, SCALES};
 use jazz_theory::note::{pc_name, use_sharp_for_root};
@@ -22,20 +20,10 @@ use jazz_theory::listening::{ALSO_EXPLORE, MASTERS, STANDARDS};
 use jazz_theory::progression::{self, Bar, Progression};
 use jazz_audio::voice::Instrument;
 
-/// Shared audio state. The Bevy side schedules bars into it; the cpal callback
-/// drains samples from it.
-struct Shared {
-    mixer: Mixer,
-    playing: bool,
-    /// Which bar of the form has been scheduled so far.
-    scheduled_bars: usize,
-    bars: Vec<Bar>,
-    settings: Settings,
-    rng: Rng,
-}
-
+/// UI-side handle to the audio thread. Sending a command never blocks, which is
+/// what keeps playback free of dropouts.
 #[derive(Resource, Clone)]
-struct Audio(Arc<Mutex<Shared>>);
+struct Audio(AudioHandle);
 
 #[derive(Resource)]
 struct AppState {
@@ -52,6 +40,12 @@ struct AppState {
     rng: Rng,
     /// Theme is applied once, on the first frame that has a context.
     styled: bool,
+    // ---- transport, owned here now that the audio thread owns the mixer ----
+    bars: Vec<Bar>,
+    settings: Settings,
+    /// How many bars of the form have been queued to the audio thread.
+    scheduled_bars: usize,
+    sched_rng: Rng,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -81,15 +75,7 @@ fn main() {
 
     let progs = progression::all();
     let bars = progs[0].bars.clone();
-
-    let shared = Arc::new(Mutex::new(Shared {
-        mixer: Mixer::new(SAMPLE_RATE),
-        playing: false,
-        scheduled_bars: 0,
-        bars,
-        settings: Settings::default(),
-        rng: Rng::new(0xC0FFEE),
-    }));
+    let (handle, core) = AudioCore::new(SAMPLE_RATE);
 
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -108,7 +94,7 @@ fn main() {
             ..default()
         }))
         .add_plugins(EguiPlugin::default())
-        .insert_resource(Audio(shared))
+        .insert_resource(Audio(handle))
         .insert_resource(AppState {
             progs,
             prog_index: 0,
@@ -122,9 +108,13 @@ fn main() {
             ear: EarState::default(),
             rng: Rng::new(0x51EED),
             styled: false,
+            bars,
+            settings: Settings::default(),
+            scheduled_bars: 0,
+            sched_rng: Rng::new(0xC0FFEE),
         })
         .insert_resource(ClearColor(Color::srgb(0.06, 0.07, 0.09)))
-        .init_non_send::<AudioStream>()
+        .insert_non_send(AudioStream { stream: None, core: Some(core) })
         .add_systems(Startup, setup_camera)
         .add_systems(Update, (start_audio_on_first_interaction, keep_audio_fed).chain())
         .add_systems(EguiPrimaryContextPass, ui)
@@ -159,8 +149,18 @@ fn setup_camera(mut commands: Commands) {
 /// The live output stream. `cpal::Stream` is `!Send`, and on the web the audio
 /// context may not be created before a user gesture, so it is a non-send resource
 /// opened lazily rather than at start-up.
-#[derive(Default)]
-struct AudioStream(Option<cpal::Stream>);
+struct AudioStream {
+    stream: Option<cpal::Stream>,
+    /// Held until a user gesture lets us open the device.
+    core: Option<AudioCore>,
+}
+
+/// Where to look for an optional General MIDI SoundFont.
+///
+/// Drop any `.sf2` here and pitched instruments render from real samples instead
+/// of synthesis; drums stay synthesised either way. Absent or unreadable files are
+/// ignored, so this can never cost you audio.
+const SOUNDFONT_PATH: &str = "assets/soundfont.sf2";
 
 /// Browsers block audio until the user interacts with the page, so the stream is
 /// opened on the first click or key press. Native behaves identically, which keeps
@@ -172,32 +172,50 @@ fn start_audio_on_first_interaction(
     keys: Res<ButtonInput<KeyCode>>,
     touches: Res<Touches>,
 ) {
-    if stream.0.is_some() {
+    if stream.stream.is_some() {
         return;
     }
     let interacted = buttons.get_just_pressed().next().is_some()
         || keys.get_just_pressed().next().is_some()
         || touches.iter_just_pressed().next().is_some();
     if interacted {
-        stream.0 = start_audio(audio.0.clone());
+        if let Some(mut core) = stream.core.take() {
+            match jazz_audio::soundfont::SoundfontVoices::load(SOUNDFONT_PATH, SAMPLE_RATE) {
+                Ok(sf) => {
+                    info_once(&format!("using soundfont {SOUNDFONT_PATH}"));
+                    core.set_soundfont(Some(sf));
+                }
+                Err(why) => info_once(&format!("built-in synth ({why})")),
+            }
+            match start_audio(core) {
+                Ok(s) => stream.stream = Some(s),
+                Err((core, why)) => {
+                    eprintln!("audio unavailable: {why}");
+                    stream.core = Some(core); // keep it, so a later click can retry
+                }
+            }
+        }
     }
+    let _ = &audio;
 }
 
-/// Top up the scheduler so there is always at least a bar of music queued ahead.
-fn keep_audio_fed(audio: Res<Audio>) {
-    let mut s = audio.0.lock().unwrap();
-    if !s.playing {
+/// Keep at least a couple of bars queued ahead of the play head.
+///
+/// This runs on the Bevy schedule and only ever *sends*; the audio thread is never
+/// made to wait for it.
+fn keep_audio_fed(audio: Res<Audio>, mut state: ResMut<AppState>) {
+    if !audio.0.is_playing() || state.bars.is_empty() {
         return;
     }
-    let bar_len = 4.0 * 60.0 / s.settings.tempo;
-    let now = s.mixer.time();
-    // schedule up to two bars beyond the play head
-    while (s.scheduled_bars as f32) * bar_len < now + bar_len * 2.0 {
-        let i = s.scheduled_bars;
-        let (bars, settings) = (s.bars.clone(), s.settings);
-        let plan = plan_bar(&bars, i, &settings, &mut s.rng);
-        s.mixer.schedule(&plan, i as f32 * bar_len);
-        s.scheduled_bars += 1;
+    let bar_len = 4.0 * 60.0 / state.settings.tempo;
+    let now = audio.0.time();
+    let bars = state.bars.clone();
+    let settings = state.settings;
+    while (state.scheduled_bars as f32) * bar_len < now + bar_len * 2.0 {
+        let i = state.scheduled_bars;
+        let plan = plan_bar(&bars, i, &settings, &mut state.sched_rng);
+        audio.0.schedule(plan, i as f32 * bar_len);
+        state.scheduled_bars += 1;
     }
 }
 
@@ -267,10 +285,11 @@ fn apply_style(ctx: &egui::Context) {
 }
 
 fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
-    let mut s = audio.0.lock().unwrap();
+    let playing = audio.0.is_playing();
 
     ui.horizontal(|ui| {
         ui.label("Progression");
+        let before = state.prog_index;
         egui::ComboBox::from_id_salt("progression")
             .selected_text(state.progs[state.prog_index].name)
             .show_ui(ui, |ui| {
@@ -278,55 +297,66 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
                     ui.selectable_value(&mut state.prog_index, i, p.name);
                 }
             });
-        if ui.button(if s.playing { "⏸ Stop" } else { "▶ Play" }).clicked() {
-            s.playing = !s.playing;
-            if s.playing {
-                let bars = state.progs[state.prog_index].bars.clone();
-                s.bars = bars;
-                s.scheduled_bars = 0;
-                s.mixer.clear();
+        if state.prog_index != before {
+            load_progression(state, audio, state.prog_index, playing);
+        }
+        if ui.button(if playing { "\u{23F8} Stop" } else { "\u{25B6} Play" }).clicked() {
+            if playing {
+                audio.0.set_playing(false);
             } else {
-                s.mixer.clear();
+                load_progression(state, audio, state.prog_index, true);
             }
         }
     });
 
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        ui.add(egui::Slider::new(&mut s.settings.tempo, 50.0..=280.0).text("bpm"));
-        ui.checkbox(&mut s.settings.swing, "Swing");
-        ui.checkbox(&mut s.settings.bass, "Bass");
-        ui.checkbox(&mut s.settings.chords, "Chords");
-        ui.checkbox(&mut s.settings.drums, "Drums");
+        if ui
+            .add(egui::Slider::new(&mut state.settings.tempo, 50.0..=280.0).text("bpm"))
+            .changed()
+        {
+            // a tempo change re-times every future bar, so requeue from here
+            requeue(state, audio);
+        }
+        ui.checkbox(&mut state.settings.swing, "Swing");
+        ui.checkbox(&mut state.settings.bass, "Bass");
+        ui.checkbox(&mut state.settings.chords, "Chords");
+        ui.checkbox(&mut state.settings.drums, "Drums");
     });
     ui.horizontal(|ui| {
         ui.label("Comping");
         egui::ComboBox::from_id_salt("comping")
-            .selected_text(format!("{:?}", s.settings.density))
+            .selected_text(format!("{:?}", state.settings.density))
             .show_ui(ui, |ui| {
                 for d in [Density::Sparse, Density::Medium, Density::Busy] {
-                    ui.selectable_value(&mut s.settings.density, d, format!("{d:?}"));
+                    ui.selectable_value(&mut state.settings.density, d, format!("{d:?}"));
                 }
             });
-        if ui.add(egui::Slider::new(&mut state.volume, 0.0..=1.5).text("Volume")).changed() {
-            s.mixer.volume = state.volume;
+        if ui
+            .add(egui::Slider::new(&mut state.volume, 0.0..=1.5).text("Volume"))
+            .changed()
+        {
+            audio.0.set_volume(state.volume);
         }
     });
 
     ui.separator();
 
-    // Which bar is sounding right now?
-    let bars = state.progs[state.prog_index].bars.clone();
-    let bar_len = 4.0 * 60.0 / s.settings.tempo;
-    let current = if s.playing && !bars.is_empty() {
-        ((s.mixer.time() / bar_len) as usize) % bars.len()
+    let bars = state.bars.clone();
+    if bars.is_empty() {
+        return;
+    }
+    let bar_len = 4.0 * 60.0 / state.settings.tempo;
+    let current = if playing {
+        ((audio.0.time() / bar_len) as usize) % bars.len()
     } else {
         0
     };
 
-    ui.label(egui::RichText::new(bars[current].symbol()).size(34.0).strong());
     let slot = bars[current].chord_at(0);
+    ui.label(egui::RichText::new(bars[current].symbol()).size(34.0).strong());
     let use_sharp = use_sharp_for_root(slot.root);
+    let root_note = jazz_theory::note::Note::parse(pc_name(slot.root, use_sharp));
     let tones: Vec<String> = slot
         .quality
         .ints()
@@ -335,12 +365,7 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
         .map(|(&i, d)| {
             format!(
                 "{} {}",
-                jazz_theory::note::note_name(
-                    slot.root + i,
-                    d,
-                    jazz_theory::note::Note::parse(pc_name(slot.root, use_sharp)),
-                    use_sharp
-                ),
+                jazz_theory::note::note_name(slot.root + i, d, root_note, use_sharp),
                 d
             )
         })
@@ -352,7 +377,7 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     egui::ScrollArea::vertical().show(ui, |ui| {
         egui::Grid::new("bars").spacing([10.0, 10.0]).min_col_width(130.0).show(ui, |ui| {
             for (i, b) in bars.iter().enumerate() {
-                let playing_here = i == current && s.playing;
+                let playing_here = i == current && playing;
                 ui.group(|ui| {
                     ui.set_width(118.0);
                     ui.vertical_centered(|ui| {
@@ -370,6 +395,23 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
             }
         });
     });
+}
+
+/// Load a progression's changes and (re)start the transport from its top.
+fn load_progression(state: &mut AppState, audio: &Audio, index: usize, play: bool) {
+    state.bars = state.progs[index].bars.clone();
+    state.scheduled_bars = 0;
+    audio.0.clear();
+    audio.0.set_playing(play);
+}
+
+/// Requeue from the top after something that changes future timing.
+fn requeue(state: &mut AppState, audio: &Audio) {
+    if audio.0.is_playing() {
+        state.scheduled_bars = 0;
+        audio.0.clear();
+        audio.0.set_playing(true);
+    }
 }
 
 fn theory_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
@@ -399,13 +441,7 @@ fn theory_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
         for n in &notes {
             // clicking a note sounds it, the same as the browser version
             if note_chip(ui, &n.name, &n.degree).clicked() {
-                audio.0.lock().unwrap().mixer.play_note(
-                    Instrument::Vibes,
-                    root_midi + n.semitones,
-                    0.20,
-                    0.50,
-                    0.0,
-                );
+                audio.0.note(Instrument::Vibes, root_midi + n.semitones, 0.20, 0.50, 0.0);
             }
         }
     });
@@ -413,16 +449,15 @@ fn theory_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         if ui.button("\u{25B6} Play ascending").clicked() {
-            let mut s = audio.0.lock().unwrap();
             for (i, n) in notes.iter().enumerate() {
-                s.mixer.play_note(Instrument::Vibes, root_midi + n.semitones, 0.20, 0.30, i as f32 * 0.34);
+                audio.0.note(Instrument::Vibes, root_midi + n.semitones, 0.20, 0.30, i as f32 * 0.34);
             }
             // top off with the octave so the scale resolves
-            s.mixer.play_note(Instrument::Vibes, root_midi + 12, 0.20, 0.40, notes.len() as f32 * 0.34);
+            audio.0.note(Instrument::Vibes, root_midi + 12, 0.20, 0.40, notes.len() as f32 * 0.34);
         }
         if ui.button("\u{25B6} Play as a chord").clicked() {
             let midis: Vec<i32> = notes.iter().map(|n| root_midi + n.semitones).collect();
-            audio.0.lock().unwrap().mixer.play_chord(Instrument::Keys, &midis, 0.07, 1.6, 0.0);
+            audio.0.chord(Instrument::Keys, midis, 0.07, 1.6, 0.0);
         }
     });
     ui.add_space(8.0);
@@ -466,17 +501,14 @@ fn drills_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
             let _ = root;
             for n in &d.notes {
                 if note_chip(ui, &n.name, &n.degree).clicked() {
-                    audio.0.lock().unwrap().mixer.play_note(
-                        Instrument::Vibes, n.midi, 0.20, 0.45, 0.0,
-                    );
+                    audio.0.note(Instrument::Vibes, n.midi, 0.20, 0.45, 0.0);
                 }
             }
         });
         ui.add_space(8.0);
         if ui.button("\u{25B6} Play the line").clicked() {
-            let mut s = audio.0.lock().unwrap();
             for (i, n) in d.notes.iter().enumerate() {
-                s.mixer.play_note(Instrument::Vibes, n.midi, 0.20, 0.30, i as f32 * 0.33);
+                audio.0.note(Instrument::Vibes, n.midi, 0.20, 0.30, i as f32 * 0.33);
             }
         }
         ui.add_space(6.0);
@@ -494,10 +526,9 @@ fn sound_question(q: &Question, audio: &Audio) {
         EarMode::Progressions => (1.0, 0.95, 0.08, Instrument::Keys),
         _ => (1.0, 1.5, 0.085, Instrument::Keys),
     };
-    let mut s = audio.0.lock().unwrap();
     for (index, notes) in ear::voicing(q) {
         let at = 0.05 + index as f32 * slot;
-        s.mixer.play_chord(instrument, &notes, gain, dur, at);
+        audio.0.chord(instrument, notes, gain, dur, at);
     }
 }
 
@@ -666,49 +697,55 @@ fn listening_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
         if let Some(id) = load {
             if let Some(i) = state.progs.iter().position(|p| p.id == id) {
                 state.prog_index = i;
-                let mut s = audio.0.lock().unwrap();
-                s.bars = state.progs[i].bars.clone();
-                s.scheduled_bars = 0;
-                s.mixer.clear();
-                s.playing = true;
+                load_progression(state, audio, i, true);
                 state.tab = Tab::PlayAlong;
             }
         }
     });
 }
 
-/// Open the default output device and stream from the shared mixer.
-fn start_audio(shared: Arc<Mutex<Shared>>) -> Option<cpal::Stream> {
+/// Print a one-off note about which sound engine is in use.
+fn info_once(msg: &str) {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    let owned = msg.to_string();
+    ONCE.call_once(move || println!("[audio] {owned}"));
+}
+
+/// Open the default output device and hand the core to the callback.
+///
+/// On failure the core is returned so a later gesture can try again — losing the
+/// device should never cost you the queued music.
+fn start_audio(mut core: AudioCore) -> Result<cpal::Stream, (AudioCore, String)> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
     let host = cpal::default_host();
-    let device = host.default_output_device()?;
-    let config = device.default_output_config().ok()?;
+    let Some(device) = host.default_output_device() else {
+        return Err((core, "no output device".into()));
+    };
+    let config = match device.default_output_config() {
+        Ok(c) => c,
+        Err(e) => return Err((core, format!("no usable output config: {e}"))),
+    };
     let channels = config.channels() as usize;
+    // Follow the device rather than assuming 44.1 kHz; a 48 kHz device would
+    // otherwise play everything about a tone sharp and correspondingly fast.
+    core.set_sample_rate(config.sample_rate().0 as f32);
 
-    let stream = device
-        .build_output_stream(
-            &config.config(),
-            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                let mut guard = match shared.try_lock() {
-                    Ok(g) => g,
-                    // Never block the audio thread; a dropped buffer is better than a glitch.
-                    Err(_) => {
-                        data.fill(0.0);
-                        return;
-                    }
-                };
-                for frame in data.chunks_mut(channels) {
-                    let s = if guard.playing { guard.mixer.tick() } else { 0.0 };
-                    for out in frame.iter_mut() {
-                        *out = s;
-                    }
-                }
-            },
-            |err| eprintln!("audio stream error: {err}"),
-            None,
-        )
-        .ok()?;
-    stream.play().ok()?;
-    Some(stream)
+    let mut core = core;
+    let built = device.build_output_stream(
+        &config.config(),
+        move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+            core.fill(data, channels);
+        },
+        |err| eprintln!("audio stream error: {err}"),
+        None,
+    );
+    match built {
+        Ok(stream) => match stream.play() {
+            Ok(()) => Ok(stream),
+            Err(e) => Err((AudioCore::new(44_100.0).1, format!("could not start stream: {e}"))),
+        },
+        Err(e) => Err((AudioCore::new(44_100.0).1, format!("could not open stream: {e}"))),
+    }
 }

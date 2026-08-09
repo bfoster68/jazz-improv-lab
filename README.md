@@ -78,6 +78,20 @@ cargo run -p jazz-app --release
 On Linux the app needs ALSA headers (`libasound2-dev`); the `render-wav` binary and
 the test suite need nothing at all.
 
+### Better sounds
+
+Drop any General MIDI `.sf2` at `crates/jazz-app/assets/soundfont.sf2` and piano,
+bass and vibraphone play from real samples instead of synthesis (drums stay
+synthesised). The app prints which engine it chose at startup, and a missing file
+simply leaves you on the synth. See `crates/jazz-app/assets/README.md`.
+
+### Why the build is smaller than a typical Bevy app
+
+Bevy ships with glTF loading, gamepad support, its own audio stack and a full set
+of image codecs. This app needs none of them, so it is built with
+`default-features = false`: **409 crates down to 258**, with a correspondingly
+smaller wasm bundle for itch.io.
+
 ## The document
 
 `docs/Jazz-Improvisation-Rules-and-Guide.docx` — five parts: the rules codified as
@@ -113,8 +127,8 @@ fake book teaches — not as melodies.
 
 ## Verified state
 
-- `jazz-theory` — 76 tests
-- `jazz-audio` — 32 tests + 2 doc tests
+- `jazz-theory` — 84 tests
+- `jazz-audio` — 40 tests + 2 doc tests
 - `jazz-app` — builds and links clean against Bevy 0.19 / bevy_egui 0.41 / egui 0.35
 
 The native app has five tabs: Play-Along, Theory, Drills, Ear Training, and
