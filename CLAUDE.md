@@ -119,6 +119,47 @@ cd docs && node build-docx.js
   uses `b` and `#`; ♭ and ♯ are substituted only at display time (`fmtMusic` in the
   web app). Never feed glyphs back into the theory layer.
 
+
+## Where things stand
+
+Last verified state: **126 tests pass**, `cargo check --workspace` is clean with no
+warnings, and `jazz-app` builds and links.
+
+Recently done, in order:
+1. Ported the musical core to Rust (`jazz-theory`, `jazz-audio`) with tests that
+   check musical truth, not just code behaviour.
+2. Brought the Bevy app to five tabs: Play-Along, Theory, Drills, Ear Training,
+   Masters & Standards.
+3. Ran the app under a virtual display, which exposed an egui layout bug that
+   compilation could not have caught (see the layout gotcha above).
+4. Rewrote the audio boundary to be lock-free after playback stuttered, and made
+   the mixer follow the device sample rate.
+5. Added optional SoundFont playback, and trimmed Bevy from 409 crates to 258.
+
+### Next step: wire the Learn tab
+
+The content is written and tested in `jazz_theory::curriculum` but nothing renders
+it yet. `LESSONS` is a flat slice already in teaching order, each carrying:
+
+- `level` — `Beginner` / `Intermediate` / `Advanced`
+- `title`, `body` (paragraphs separated by a blank line)
+- `try_it: Option<TryIt>` — `Drill(id)`, `Progression(id)` or `Scale(name)`
+
+The work is: add a `Tab::Learn`, put a level filter across the top (the browser
+build defaults to Beginner), render each lesson as a card, and turn `try_it` into a
+button that switches tab and loads the thing it names. `listening_ui` already does
+exactly that pattern for standards — copy its `load` approach, which defers the
+mutation until after the loop to avoid borrowing `state` twice.
+
+Every `try_it` is guaranteed to resolve; a test enforces it.
+
+### Open questions worth checking with the user
+
+- Does the audio dropout fix actually sound right on real hardware? It is verified
+  by test, but nobody has heard it yet.
+- The wasm build has never been compiled. `itch/build-wasm.ps1` is written but
+  unproven; expect a `wasm-bindgen-cli` version mismatch to be the first hurdle.
+
 ## Known gaps
 
 - The Learn curriculum is written and tested in `jazz_theory::curriculum` but not
