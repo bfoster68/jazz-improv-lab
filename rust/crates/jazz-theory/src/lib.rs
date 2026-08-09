@@ -25,6 +25,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod curriculum;
 pub mod drill;
 pub mod ear;
 pub mod harmony;

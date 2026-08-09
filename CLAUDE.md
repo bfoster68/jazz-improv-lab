@@ -74,7 +74,7 @@ tests-web/                Playwright suites for the browser app
 ```bash
 # Rust
 cd rust
-cargo test -p jazz-theory -p jazz-audio   # 110 tests, ~1s, no audio device needed
+cargo test -p jazz-theory -p jazz-audio   # 118 tests, ~2s, no audio device needed
 cargo check --workspace                  # includes the Bevy app
 cargo run -p jazz-audio --bin render-wav -- --list
 cargo run -p jazz-audio --bin render-wav -- bluebossa --tempo 150   # hear the engine
@@ -102,14 +102,19 @@ cd docs && node build-docx.js
 - **Audio is testable without a sound card.** `jazz-audio` renders to buffers, so
   every audio test runs offline. Keep it that way — do not add a backend dependency
   to that crate.
+- **egui layout gotcha.** `vertical_centered` claims all remaining width, so a chip
+  built with it inside `horizontal_wrapped` swallows the row and hides every item
+  after the first. Running the app is what exposed this; use `note_chip`, which
+  sets an explicit width.
 - **Notation is ASCII internally, glyphs at the edge.** The theory engine always
   uses `b` and `#`; ♭ and ♯ are substituted only at display time (`fmtMusic` in the
   web app). Never feed glyphs back into the theory layer.
 
 ## Known gaps
 
-- The Bevy app now covers Play-Along, Theory, Drills, Ear Training and Masters &
-  Standards. Remaining web-only piece: the Learn tab's written curriculum.
+- The Learn curriculum is written and tested in `jazz_theory::curriculum` but not
+  yet wired into a Bevy tab. `LESSONS` carries level, title, body and an optional
+  `TryIt` cross-reference; rendering it is the next step.
 - The web app's optional high-quality sounds download FluidR3 samples from a CDN;
   the Rust side is synthesis-only.
 - Rust has no soundfont support and no reverb yet (the browser build has a

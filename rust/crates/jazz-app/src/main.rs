@@ -50,6 +50,8 @@ struct AppState {
     ear_mode: EarMode,
     ear: EarState,
     rng: Rng,
+    /// Theme is applied once, on the first frame that has a context.
+    styled: bool,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -119,6 +121,7 @@ fn main() {
             ear_mode: EarMode::Intervals,
             ear: EarState::default(),
             rng: Rng::new(0x51EED),
+            styled: false,
         })
         .insert_resource(ClearColor(Color::srgb(0.06, 0.07, 0.09)))
         .init_non_send::<AudioStream>()
@@ -126,6 +129,27 @@ fn main() {
         .add_systems(Update, (start_audio_on_first_interaction, keep_audio_fed).chain())
         .add_systems(EguiPrimaryContextPass, ui)
         .run();
+}
+
+
+/// A fixed-width note cell.
+///
+/// `vertical_centered` claims all remaining width, so a chip built with it inside
+/// a wrapped row swallows the line and hides every note after the first. Setting an
+/// explicit width is what makes the row wrap correctly.
+fn note_chip(ui: &mut egui::Ui, name: &str, degree: &str) -> egui::Response {
+    let r = ui.group(|ui| {
+        ui.set_width(52.0);
+        ui.vertical_centered(|ui| {
+            ui.label(egui::RichText::new(name).size(19.0).strong());
+            ui.label(
+                egui::RichText::new(degree)
+                    .size(12.0)
+                    .color(egui::Color32::from_rgb(75, 179, 167)),
+            );
+        });
+    });
+    r.response.interact(egui::Sense::click())
 }
 
 fn setup_camera(mut commands: Commands) {
@@ -183,6 +207,11 @@ fn ui(mut contexts: EguiContexts, mut state: ResMut<AppState>, audio: Res<Audio>
     };
     let ctx = ctx.clone();
 
+    if !state.styled {
+        apply_style(&ctx);
+        state.styled = true;
+    }
+
     // egui 0.35 draws panels into a root `Ui` covering the viewport rather than
     // straight into the context.
     let mut root = egui::Ui::new(
@@ -214,11 +243,35 @@ fn ui(mut contexts: EguiContexts, mut state: ResMut<AppState>, audio: Res<Audio>
     });
 }
 
+/// Match the browser build's dark palette and give the text room to breathe.
+fn apply_style(ctx: &egui::Context) {
+    let mut visuals = egui::Visuals::dark();
+    visuals.panel_fill = egui::Color32::from_rgb(15, 18, 22);
+    visuals.window_fill = egui::Color32::from_rgb(23, 27, 34);
+    visuals.extreme_bg_color = egui::Color32::from_rgb(12, 15, 19);
+    visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(30, 36, 46);
+    visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(35, 43, 54);
+    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(45, 55, 68);
+    visuals.selection.bg_fill = egui::Color32::from_rgb(224, 166, 60);
+    visuals.selection.stroke.color = egui::Color32::from_rgb(26, 18, 6);
+    ctx.set_visuals(visuals);
+
+    // egui 0.35 keeps a style per theme, so mutate them all rather than one.
+    ctx.all_styles_mut(|style| {
+        for (_, font) in style.text_styles.iter_mut() {
+            font.size *= 1.25;
+        }
+        style.spacing.item_spacing = egui::vec2(8.0, 7.0);
+        style.spacing.button_padding = egui::vec2(10.0, 5.0);
+    });
+}
+
 fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     let mut s = audio.0.lock().unwrap();
 
     ui.horizontal(|ui| {
-        egui::ComboBox::from_label("Progression")
+        ui.label("Progression");
+        egui::ComboBox::from_id_salt("progression")
             .selected_text(state.progs[state.prog_index].name)
             .show_ui(ui, |ui| {
                 for (i, p) in state.progs.iter().enumerate() {
@@ -247,7 +300,8 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
         ui.checkbox(&mut s.settings.drums, "Drums");
     });
     ui.horizontal(|ui| {
-        egui::ComboBox::from_label("Comping")
+        ui.label("Comping");
+        egui::ComboBox::from_id_salt("comping")
             .selected_text(format!("{:?}", s.settings.density))
             .show_ui(ui, |ui| {
                 for d in [Density::Sparse, Density::Medium, Density::Busy] {
@@ -296,15 +350,20 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
 
     ui.add_space(10.0);
     egui::ScrollArea::vertical().show(ui, |ui| {
-        egui::Grid::new("bars").spacing([8.0, 8.0]).show(ui, |ui| {
+        egui::Grid::new("bars").spacing([10.0, 10.0]).min_col_width(130.0).show(ui, |ui| {
             for (i, b) in bars.iter().enumerate() {
-                let text = egui::RichText::new(b.symbol());
-                let text = if i == current && s.playing {
-                    text.strong().color(egui::Color32::from_rgb(224, 166, 60))
-                } else {
-                    text
-                };
-                ui.label(text);
+                let playing_here = i == current && s.playing;
+                ui.group(|ui| {
+                    ui.set_width(118.0);
+                    ui.vertical_centered(|ui| {
+                        let mut t = egui::RichText::new(b.symbol()).size(17.0);
+                        if playing_here {
+                            t = t.strong().color(egui::Color32::from_rgb(224, 166, 60));
+                        }
+                        ui.label(t);
+                        ui.label(egui::RichText::new(format!("bar {}", i + 1)).size(11.0).weak());
+                    });
+                });
                 if (i + 1) % 4 == 0 {
                     ui.end_row();
                 }
@@ -315,14 +374,16 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
 
 fn theory_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     ui.horizontal(|ui| {
-        egui::ComboBox::from_label("Root")
+        ui.label("Root");
+        egui::ComboBox::from_id_salt("root")
             .selected_text(pc_name(state.scale_root, use_sharp_for_root(state.scale_root)))
             .show_ui(ui, |ui| {
                 for r in 0..12 {
                     ui.selectable_value(&mut state.scale_root, r, pc_name(r, use_sharp_for_root(r)));
                 }
             });
-        egui::ComboBox::from_label("Scale")
+        ui.label("Scale");
+        egui::ComboBox::from_id_salt("scale")
             .selected_text(SCALES[state.scale_index].name)
             .show_ui(ui, |ui| {
                 for (i, s) in SCALES.iter().enumerate() {
@@ -336,14 +397,8 @@ fn theory_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     let root_midi = jazz_theory::note::midi_for(state.scale_root, 4);
     ui.horizontal_wrapped(|ui| {
         for n in &notes {
-            let cell = ui.group(|ui| {
-                ui.vertical_centered(|ui| {
-                    ui.label(egui::RichText::new(&n.name).size(20.0).strong());
-                    ui.label(egui::RichText::new(&n.degree).weak());
-                });
-            });
             // clicking a note sounds it, the same as the browser version
-            if cell.response.interact(egui::Sense::click()).clicked() {
+            if note_chip(ui, &n.name, &n.degree).clicked() {
                 audio.0.lock().unwrap().mixer.play_note(
                     Instrument::Vibes,
                     root_midi + n.semitones,
@@ -378,14 +433,16 @@ fn theory_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
 
 fn drills_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     ui.horizontal(|ui| {
-        egui::ComboBox::from_label("Drill")
+        ui.label("Drill");
+        egui::ComboBox::from_id_salt("drill")
             .selected_text(DRILL_IDS[state.drill_index])
             .show_ui(ui, |ui| {
                 for (i, id) in DRILL_IDS.iter().enumerate() {
                     ui.selectable_value(&mut state.drill_index, i, *id);
                 }
             });
-        egui::ComboBox::from_label("Key")
+        ui.label("Key");
+        egui::ComboBox::from_id_salt("key")
             .selected_text(pc_name(state.drill_key, use_sharp_for_root(state.drill_key)))
             .show_ui(ui, |ui| {
                 for r in 0..12 {
@@ -405,13 +462,14 @@ fn drills_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
         });
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
+            let root = jazz_theory::note::midi_for(state.drill_key, 4);
+            let _ = root;
             for n in &d.notes {
-                ui.group(|ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.label(egui::RichText::new(&n.name).size(18.0).strong());
-                        ui.label(egui::RichText::new(&n.degree).weak());
-                    });
-                });
+                if note_chip(ui, &n.name, &n.degree).clicked() {
+                    audio.0.lock().unwrap().mixer.play_note(
+                        Instrument::Vibes, n.midi, 0.20, 0.45, 0.0,
+                    );
+                }
             }
         });
         ui.add_space(8.0);
@@ -446,7 +504,8 @@ fn sound_question(q: &Question, audio: &Audio) {
 fn ear_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     ui.horizontal(|ui| {
         let before = state.ear_mode;
-        egui::ComboBox::from_label("Mode")
+        ui.label("Mode");
+        egui::ComboBox::from_id_salt("mode")
             .selected_text(state.ear_mode.label())
             .show_ui(ui, |ui| {
                 for m in EarMode::ALL {
