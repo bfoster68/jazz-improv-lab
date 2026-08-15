@@ -50,6 +50,9 @@ struct AppState {
     /// changing `bar_len` under an un-requeued transport schedules bars into the
     /// past and they all sound at once.
     pending_tempo: Option<f32>,
+    /// The last bar the chart auto-scrolled to, so it follows the music once
+    /// per bar instead of pinning the view against the user's own scrolling.
+    chart_bar: usize,
     /// Audio-clock time (seconds) at which the current transport started. The
     /// mixer clock free-runs and is never reset, so bars must be scheduled
     /// relative to this epoch rather than to absolute zero — otherwise a restart
@@ -123,6 +126,7 @@ fn main() {
             settings: Settings::default(),
             scheduled_bars: 0,
             pending_tempo: None,
+            chart_bar: 0,
             epoch: 0.0,
             sched_rng: Rng::new(0xC0FFEE),
         })
@@ -428,26 +432,60 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     ui.label(format!("Suggested scale: {}", slot.scale_name()));
 
     ui.add_space(10.0);
+    // ---- the chart: four-bar systems that read like a lead sheet ----
+    let sections = state.progs[state.prog_index].sections;
+    let gold = egui::Color32::from_rgb(224, 166, 60);
     egui::ScrollArea::vertical().show(ui, |ui| {
-        egui::Grid::new("bars").spacing([10.0, 10.0]).min_col_width(130.0).show(ui, |ui| {
-            for (i, b) in bars.iter().enumerate() {
-                let playing_here = i == current && playing;
-                ui.group(|ui| {
-                    ui.set_width(118.0);
-                    ui.vertical_centered(|ui| {
-                        let mut t = egui::RichText::new(b.symbol()).size(17.0);
-                        if playing_here {
-                            t = t.strong().color(egui::Color32::from_rgb(224, 166, 60));
-                        }
-                        ui.label(t);
-                        ui.label(egui::RichText::new(format!("bar {}", i + 1)).size(11.0).weak());
-                    });
-                });
-                if (i + 1) % 4 == 0 {
-                    ui.end_row();
+        for (sys, chunk) in bars.chunks(4).enumerate() {
+            let start = sys * 4;
+            let row = ui.horizontal(|ui| {
+                // Section letter in the margin where a section begins.
+                let label = sections
+                    .iter()
+                    .find(|(at, _)| *at == start)
+                    .map(|(_, l)| *l)
+                    .unwrap_or("");
+                ui.add_sized(
+                    [22.0, 36.0],
+                    egui::Label::new(egui::RichText::new(label).strong().size(18.0).color(gold)),
+                );
+                for (j, b) in chunk.iter().enumerate() {
+                    let i = start + j;
+                    ui.label(egui::RichText::new("|").weak().size(22.0));
+                    // Fake-book shorthand: a bar identical to the one before it
+                    // reads as a repeat, but the symbol returns at a new system
+                    // so a line always starts readable.
+                    let sym = if j > 0 && bars[i - 1].symbol() == b.symbol() {
+                        "%".to_string()
+                    } else {
+                        b.symbol()
+                    };
+                    let here = playing && i == current;
+                    let (fill, color) = if here {
+                        (gold, egui::Color32::from_rgb(26, 18, 6))
+                    } else {
+                        (egui::Color32::TRANSPARENT, ui.visuals().text_color())
+                    };
+                    egui::Frame::default()
+                        .fill(fill)
+                        .corner_radius(egui::CornerRadius::same(4))
+                        .inner_margin(egui::Margin::symmetric(4, 6))
+                        .show(ui, |ui| {
+                            ui.set_width(108.0);
+                            ui.vertical_centered(|ui| {
+                                ui.label(egui::RichText::new(sym).size(17.0).strong().color(color));
+                            });
+                        });
                 }
+                ui.label(egui::RichText::new("|").weak().size(22.0));
+            });
+            // Follow along: bring the sounding system into view once per bar,
+            // so the reader tracks the form but can still scroll around freely.
+            if playing && (start..start + chunk.len()).contains(&current) && state.chart_bar != current {
+                row.response.scroll_to_me(Some(egui::Align::Center));
+                state.chart_bar = current;
             }
-        });
+        }
     });
 }
 

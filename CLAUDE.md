@@ -74,7 +74,7 @@ tests-web/                Playwright suites for the browser app
 ```bash
 # Rust
 cd rust
-cargo test -p jazz-theory -p jazz-audio   # 134 tests, ~2s, no audio device needed
+cargo test -p jazz-theory -p jazz-audio   # 141 tests, ~2s, no audio device needed
 cargo test -p jazz-audio --features soundfont   # includes the SoundFont paths
 cargo check --workspace                  # includes the Bevy app
 cargo run -p jazz-audio --bin render-wav -- --list
@@ -123,9 +123,17 @@ cd docs && node build-docx.js
 
 ## Where things stand
 
-Last verified state: **134 tests pass** (85 theory + 49 audio), `cargo check
+Last verified state: **141 tests pass** (92 theory + 49 audio), `cargo check
 --workspace` is clean with no warnings, and `jazz-app` builds, links, and has
 been run and heard on real hardware.
+
+The progression catalogue holds 21 forms including seven full standards added
+as changes-only charts (All the Things You Are, All of Me, Fly Me to the Moon,
+Misty, Tune Up, Solar, Cantaloupe Island — the last two credited to Chuck Wayne
+and Eddie Vinson, who wrote them, with the Miles Davis connection in the
+teaching note). The Play-Along tab renders a lead-sheet chart: four-bar systems
+with barlines, gold section letters from `Progression::sections`, fake-book `%`
+repeat marks, and a gold highlight that follows the sounding bar.
 
 Since then, in this order: fixed invisible UI text (bevy_egui needs the
 `default_fonts` feature); anchored the transport to an `epoch` so restarting or

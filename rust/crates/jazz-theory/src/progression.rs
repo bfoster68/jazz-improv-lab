@@ -81,7 +81,13 @@ pub struct Progression {
     pub name: &'static str,
     pub level: Level,
     pub bars: Vec<Bar>,
+    /// Where the form's sections begin, for the chart display: (bar index,
+    /// label). Empty when the form has no letter sections worth marking.
+    pub sections: &'static [(usize, &'static str)],
 }
+
+/// The classic 32-bar AABA section map.
+pub const AABA_32: &[(usize, &'static str)] = &[(0, "A"), (8, "A"), (16, "B"), (24, "A")];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Level {
@@ -243,24 +249,164 @@ pub fn rhythm_full() -> Vec<Bar> {
     out
 }
 
+/// All the Things You Are — 36 bars in Ab, roots cycling in fourths through
+/// five key centres. The C7s resolve to F minor, so they are altered; the B7
+/// stands in for the chart's passing diminished and falls a half step into
+/// Bbm7, so like every bII-style dominant here it takes Lydian dominant.
+pub fn all_the_things() -> Vec<Bar> {
+    vec![
+        // A1 — Ab, arriving in C
+        one(5, Min7), one(10, Min7), one(3, Dom7), one(8, Maj7),
+        one(1, Maj7), one(7, Dom7), one(0, Maj7), one(0, Maj7),
+        // A2 — the same shape down a fourth, arriving in G
+        one(0, Min7), one(5, Min7), one(10, Dom7), one(3, Maj7),
+        one(8, Maj7), one(2, Dom7), one(7, Maj7), one(7, Maj7),
+        // B — G major, then the minor ii-V that lands on E major anyway
+        one(9, Min7), one(2, Dom7), one(7, Maj7), one(7, Maj7),
+        one(6, Min7b5), one_s(11, Dom7, ALTERED), one(4, Maj7), one_s(0, Dom7, ALTERED),
+        // A3 — home stretch, 12 bars with the tag
+        one(5, Min7), one(10, Min7), one(3, Dom7), one(8, Maj7),
+        one(1, Maj7), one(1, Min7), one(0, Min7), one_s(11, Dom7, LYDIAN_DOM),
+        one(10, Min7), one(3, Dom7), one(8, Maj7),
+        Bar::two(Slot::new(7, Min7b5), Slot::with_scale(0, Dom7, ALTERED)),
+    ]
+}
+
+/// All of Me — 32-bar ABAC in C, a chain of secondary dominants. The A7s and
+/// E7s that resolve to minor chords are altered; the D7 colours the ii rather
+/// than resolving, so it stays plain.
+pub fn all_of_me() -> Vec<Bar> {
+    let a = vec![
+        one(0, Maj7), one(0, Maj7), one(4, Dom7), one(4, Dom7),
+        one_s(9, Dom7, ALTERED), one_s(9, Dom7, ALTERED), one(2, Min7), one(2, Min7),
+    ];
+    let b = vec![
+        one_s(4, Dom7, ALTERED), one_s(4, Dom7, ALTERED), one(9, Min7), one(9, Min7),
+        one(2, Dom7), one(2, Dom7), one(2, Min7), one(7, Dom7),
+    ];
+    let c = vec![
+        one(5, Maj7), one(5, Min7), one(4, Min7), one_s(9, Dom7, ALTERED),
+        one(2, Min7), one(7, Dom7), one(0, Maj7),
+        Bar::two(Slot::new(2, Min7), Slot::new(7, Dom7)),
+    ];
+    let mut out = a.clone();
+    out.extend(b);
+    out.extend(a);
+    out.extend(c);
+    out
+}
+
+/// Fly Me to the Moon — 32 bars in C: vi-ii-V-I rolling around the circle of
+/// fourths, with each dominant that lands on a minor chord altered.
+pub fn fly_me_to_the_moon() -> Vec<Bar> {
+    let eight = vec![
+        one(9, Min7), one(2, Min7), one(7, Dom7),
+        Bar::two(Slot::new(0, Maj7), Slot::new(0, Dom7)),
+        one(5, Maj7), one(11, Min7b5), one_s(4, Dom7, ALTERED),
+        Bar::two(Slot::new(9, Min7), Slot::with_scale(9, Dom7, ALTERED)),
+    ];
+    let close = vec![
+        one(2, Min7), one(7, Dom7), one(0, Maj7), one_s(9, Dom7, ALTERED),
+        one(2, Min7), one(7, Dom7), one(0, Maj7),
+        Bar::two(Slot::new(11, Min7b5), Slot::with_scale(4, Dom7, ALTERED)),
+    ];
+    let mut out = eight.clone();
+    out.extend(close.clone());
+    out.extend(eight);
+    out.extend(close);
+    out
+}
+
+/// Misty — 32-bar AABA ballad in Eb. The Db7 is the backdoor dominant (Lydian
+/// dominant, it never resolves down a fifth); the C7 and D7 land on minor
+/// chords and are altered.
+pub fn misty() -> Vec<Bar> {
+    let a = vec![
+        one(3, Maj7),
+        Bar::two(Slot::new(10, Min7), Slot::new(3, Dom7)),
+        one(8, Maj7),
+        Bar::two(Slot::new(8, Min7), Slot::with_scale(1, Dom7, LYDIAN_DOM)),
+        Bar::two(Slot::new(3, Maj7), Slot::new(0, Min7)),
+        Bar::two(Slot::new(5, Min7), Slot::new(10, Dom7)),
+        Bar::two(Slot::new(7, Min7), Slot::with_scale(0, Dom7, ALTERED)),
+        Bar::two(Slot::new(5, Min7), Slot::new(10, Dom7)),
+    ];
+    let bridge = vec![
+        one(10, Min7), one(3, Dom7), one(8, Maj7), one(8, Maj7),
+        Bar::two(Slot::new(9, Min7), Slot::with_scale(2, Dom7, ALTERED)),
+        Bar::two(Slot::new(7, Min7), Slot::with_scale(0, Dom7, ALTERED)),
+        one(5, Min7), one(10, Dom7),
+    ];
+    let mut out = a.clone();
+    out.extend(a.clone());
+    out.extend(bridge);
+    out.extend(a);
+    out
+}
+
+/// Tune Up — 16 bars: three ii-V-Is a whole step apart, then the tag home.
+pub fn tune_up() -> Vec<Bar> {
+    vec![
+        one(4, Min7), one(9, Dom7), one(2, Maj7), one(2, Maj7),
+        one(2, Min7), one(7, Dom7), one(0, Maj7), one(0, Maj7),
+        one(0, Min7), one(5, Dom7), one(10, Maj7), one(10, Maj7),
+        one(4, Min7), one(5, Dom7), one(10, Maj7), one(9, Dom7),
+    ]
+}
+
+/// Solar — 12 bars falling from C minor through F, Eb and Db before the ii-V
+/// pulls it home. Each new key arrives from its own ii-V.
+pub fn solar() -> Vec<Bar> {
+    vec![
+        one(0, MinTonic), one(0, MinTonic),
+        Bar::two(Slot::new(7, Min7), Slot::new(0, Dom7)),
+        one(5, Maj7), one(5, Maj7),
+        Bar::two(Slot::new(5, Min7), Slot::new(10, Dom7)),
+        one(3, Maj7),
+        Bar::two(Slot::new(3, Min7), Slot::new(8, Dom7)),
+        one(1, Maj7),
+        Bar::two(Slot::new(2, Min7b5), Slot::with_scale(7, Dom7, ALTERED)),
+        one(0, MinTonic),
+        Bar::two(Slot::new(2, Min7b5), Slot::with_scale(7, Dom7, ALTERED)),
+    ]
+}
+
+/// Cantaloupe Island — a 16-bar straight-eighths vamp in F minor. The Db7
+/// never resolves, so it takes Lydian dominant.
+pub fn cantaloupe_island() -> Vec<Bar> {
+    let mut out = vec![one(5, MinTonic); 4];
+    out.extend(vec![one_s(1, Dom7, LYDIAN_DOM); 4]);
+    out.extend(vec![one(2, Min7); 4]);
+    out.extend(vec![one(5, MinTonic); 4]);
+    out
+}
+
 /// Everything the play-along engine can load.
 pub fn all() -> Vec<Progression> {
     use Level::*;
+    const NONE: &[(usize, &'static str)] = &[];
     vec![
-        Progression { id: "251",        name: "ii-V-I in C major",            level: Beginner,     bars: two_five_one(0) },
-        Progression { id: "251min",     name: "ii-V-i in C minor",            level: Beginner,     bars: two_five_one_minor(0) },
-        Progression { id: "blues",      name: "12-bar Blues in F",            level: Beginner,     bars: blues(5) },
-        Progression { id: "modal",      name: "Modal vamp - D Dorian",        level: Beginner,     bars: modal_vamp(2) },
-        Progression { id: "autumn",     name: "Autumn Leaves (A)",            level: Intermediate, bars: autumn_leaves(10) },
-        Progression { id: "ttsub",      name: "Tritone-sub turnaround",       level: Intermediate, bars: tritone_sub(0) },
-        Progression { id: "cycle",      name: "ii-V-I through keys",          level: Intermediate, bars: cycle(0) },
-        Progression { id: "minorblues", name: "Minor blues in C",             level: Advanced,     bars: minor_blues(0) },
-        Progression { id: "coltrane",   name: "Coltrane cycle",               level: Advanced,     bars: coltrane_cycle(0) },
-        Progression { id: "sowhat",     name: "So What - full AABA",          level: Standard,     bars: so_what() },
-        Progression { id: "bluebossa",  name: "Blue Bossa",                   level: Standard,     bars: blue_bossa() },
-        Progression { id: "atrain",     name: "Take the A Train (A)",         level: Standard,     bars: a_train() },
-        Progression { id: "rhythma",    name: "Rhythm Changes (A) - Bb",      level: Standard,     bars: rhythm_a() },
-        Progression { id: "rhythmfull", name: "Rhythm Changes - full AABA",   level: Standard,     bars: rhythm_full() },
+        Progression { id: "251",        name: "ii-V-I in C major",            level: Beginner,     bars: two_five_one(0),        sections: NONE },
+        Progression { id: "251min",     name: "ii-V-i in C minor",            level: Beginner,     bars: two_five_one_minor(0),  sections: NONE },
+        Progression { id: "blues",      name: "12-bar Blues in F",            level: Beginner,     bars: blues(5),               sections: NONE },
+        Progression { id: "modal",      name: "Modal vamp - D Dorian",        level: Beginner,     bars: modal_vamp(2),          sections: NONE },
+        Progression { id: "autumn",     name: "Autumn Leaves (A)",            level: Intermediate, bars: autumn_leaves(10),      sections: NONE },
+        Progression { id: "ttsub",      name: "Tritone-sub turnaround",       level: Intermediate, bars: tritone_sub(0),         sections: NONE },
+        Progression { id: "cycle",      name: "ii-V-I through keys",          level: Intermediate, bars: cycle(0),               sections: NONE },
+        Progression { id: "minorblues", name: "Minor blues in C",             level: Advanced,     bars: minor_blues(0),         sections: NONE },
+        Progression { id: "coltrane",   name: "Coltrane cycle",               level: Advanced,     bars: coltrane_cycle(0),      sections: NONE },
+        Progression { id: "sowhat",     name: "So What - full AABA",          level: Standard,     bars: so_what(),              sections: AABA_32 },
+        Progression { id: "bluebossa",  name: "Blue Bossa",                   level: Standard,     bars: blue_bossa(),           sections: NONE },
+        Progression { id: "atrain",     name: "Take the A Train (A)",         level: Standard,     bars: a_train(),              sections: NONE },
+        Progression { id: "rhythma",    name: "Rhythm Changes (A) - Bb",      level: Standard,     bars: rhythm_a(),             sections: NONE },
+        Progression { id: "rhythmfull", name: "Rhythm Changes - full AABA",   level: Standard,     bars: rhythm_full(),          sections: AABA_32 },
+        Progression { id: "attya",      name: "All the Things You Are",       level: Standard,     bars: all_the_things(),       sections: &[(0, "A"), (8, "A"), (16, "B"), (24, "A")] },
+        Progression { id: "allofme",    name: "All of Me",                    level: Standard,     bars: all_of_me(),            sections: &[(0, "A"), (8, "B"), (16, "A"), (24, "C")] },
+        Progression { id: "flymoon",    name: "Fly Me to the Moon",           level: Standard,     bars: fly_me_to_the_moon(),   sections: &[(0, "A"), (16, "B")] },
+        Progression { id: "misty",      name: "Misty",                        level: Standard,     bars: misty(),                sections: AABA_32 },
+        Progression { id: "tuneup",     name: "Tune Up",                      level: Standard,     bars: tune_up(),              sections: NONE },
+        Progression { id: "solar",      name: "Solar",                        level: Standard,     bars: solar(),                sections: NONE },
+        Progression { id: "cantaloupe", name: "Cantaloupe Island",            level: Standard,     bars: cantaloupe_island(),    sections: NONE },
     ]
 }
 
@@ -284,6 +430,75 @@ mod tests {
     #[test]
     fn two_five_one_is_right_in_c() {
         assert_eq!(syms(&two_five_one(0)), ["Dm7", "G7", "Cmaj7", "Cmaj7"]);
+    }
+
+    #[test]
+    fn the_standards_have_their_real_forms() {
+        for (id, n) in [
+            ("attya", 36), ("allofme", 32), ("flymoon", 32), ("misty", 32),
+            ("tuneup", 16), ("solar", 12), ("cantaloupe", 16),
+        ] {
+            let p = all().into_iter().find(|p| p.id == id).unwrap();
+            assert_eq!(p.bars.len(), n, "{id} has the wrong number of bars");
+        }
+    }
+
+    #[test]
+    fn all_the_things_cycles_in_fourths_and_turns_around() {
+        let b = all_the_things();
+        assert_eq!(syms(&b[..5]), ["Fm7", "Bbm7", "Eb7", "Abmaj7", "Dbmaj7"]);
+        // A2 is the same shape down a fourth.
+        assert_eq!(syms(&b[8..12]), ["Cm7", "Fm7", "Bb7", "Ebmaj7"]);
+        // The tag's turnaround points back at the top.
+        assert_eq!(b[35].symbol(), "Gm7b5 C7");
+        // Both C7s head for F minor, so both must be altered.
+        assert_eq!(b[23].chord_at(0).scale_name(), ALTERED);
+        assert_eq!(b[35].chord_at(3).scale_name(), ALTERED);
+    }
+
+    #[test]
+    fn misty_keeps_its_backdoor_and_its_ballad_cadences() {
+        let b = misty();
+        assert_eq!(b[3].symbol(), "Abm7 Db7");
+        // The backdoor dominant never resolves down a fifth: Lydian dominant.
+        assert_eq!(b[3].chord_at(3).scale_name(), LYDIAN_DOM);
+        // C7 heads for F minor: altered.
+        assert_eq!(b[6].chord_at(3).scale_name(), ALTERED);
+        // AABA: the bridge starts with the ii-V into Ab.
+        assert_eq!(syms(&b[16..19]), ["Bbm7", "Eb7", "Abmaj7"]);
+    }
+
+    #[test]
+    fn tune_up_walks_three_keys_a_whole_step_apart() {
+        let b = tune_up();
+        assert_eq!(b[2].symbol(), "Dmaj7");
+        assert_eq!(b[6].symbol(), "Cmaj7");
+        assert_eq!(b[10].symbol(), "Bbmaj7");
+    }
+
+    #[test]
+    fn solar_falls_through_its_key_centres() {
+        let b = solar();
+        assert_eq!(b[3].symbol(), "Fmaj7");
+        assert_eq!(b[6].symbol(), "Ebmaj7");
+        assert_eq!(b[8].symbol(), "Dbmaj7");
+        // Both G7s pull back to C minor: altered.
+        assert_eq!(b[9].chord_at(3).scale_name(), ALTERED);
+        assert_eq!(b[11].chord_at(3).scale_name(), ALTERED);
+    }
+
+    #[test]
+    fn section_maps_point_inside_their_forms_in_order() {
+        for p in all() {
+            let mut last = None;
+            for (at, label) in p.sections {
+                assert!(*at < p.bars.len(), "{}: section {label} at bar {at} is past the form", p.id);
+                if let Some(prev) = last {
+                    assert!(*at > prev, "{}: sections out of order at {label}", p.id);
+                }
+                last = Some(*at);
+            }
+        }
     }
 
     #[test]

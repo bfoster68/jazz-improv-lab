@@ -103,7 +103,31 @@ pub const STANDARDS: &[Standard] = &[
     Standard { title: "All the Things You Are", composer: "Jerome Kern",
         key_and_form: "Ab major - 36 bars",
         teaches: "Chord roots cycling in fourths through shifting key centres.",
-        progression_id: None, tempo: 130.0, swing: true },
+        progression_id: Some("attya"), tempo: 130.0, swing: true },
+    Standard { title: "All of Me", composer: "Gerald Marks & Seymour Simons",
+        key_and_form: "C major - 32-bar ABAC",
+        teaches: "Secondary dominants in a row - each V7 pointing at the next stop.",
+        progression_id: Some("allofme"), tempo: 140.0, swing: true },
+    Standard { title: "Fly Me to the Moon", composer: "Bart Howard",
+        key_and_form: "C major - 32 bars",
+        teaches: "The circle of fourths sung: vi-ii-V-I rolling forward.",
+        progression_id: Some("flymoon"), tempo: 120.0, swing: true },
+    Standard { title: "Misty", composer: "Erroll Garner",
+        key_and_form: "Eb major - 32-bar AABA",
+        teaches: "Ballad playing: ii-Vs at a slow tempo, and the backdoor Db7 home.",
+        progression_id: Some("misty"), tempo: 72.0, swing: true },
+    Standard { title: "Tune Up", composer: "Eddie \"Cleanhead\" Vinson",
+        key_and_form: "D major - 16 bars",
+        teaches: "Three ii-V-Is a whole step apart; long issued under Miles Davis's name.",
+        progression_id: Some("tuneup"), tempo: 200.0, swing: true },
+    Standard { title: "Solar", composer: "Chuck Wayne",
+        key_and_form: "C minor - 12 bars",
+        teaches: "Key centres falling by fourths out of a minor home; also issued as Miles Davis's.",
+        progression_id: Some("solar"), tempo: 160.0, swing: true },
+    Standard { title: "Cantaloupe Island", composer: "Herbie Hancock",
+        key_and_form: "F minor - 16-bar vamp",
+        teaches: "Groove over three chords - rhythm is the solo's engine.",
+        progression_id: Some("cantaloupe"), tempo: 112.0, swing: false },
 ];
 
 #[cfg(test)]
@@ -163,6 +187,22 @@ mod tests {
         assert_eq!(by("Autumn Leaves").composer, "Joseph Kosma");
         assert_eq!(by("Giant Steps").composer, "John Coltrane");
         assert_eq!(by("All the Things").composer, "Jerome Kern");
+        assert_eq!(by("All of Me").composer, "Gerald Marks & Seymour Simons");
+        assert_eq!(by("Fly Me to the Moon").composer, "Bart Howard");
+        assert_eq!(by("Misty").composer, "Erroll Garner");
+        assert_eq!(by("Cantaloupe Island").composer, "Herbie Hancock");
+    }
+
+    /// Like the A Train: "Tune Up" and "Solar" were issued under Miles Davis's
+    /// name, but the evidence credits Vinson and Wayne. The teaching note keeps
+    /// the Davis connection; the composer field keeps the writer.
+    #[test]
+    fn tunes_issued_under_miless_name_credit_their_writers() {
+        let by = |t: &str| STANDARDS.iter().find(|s| s.title.starts_with(t)).unwrap();
+        assert_eq!(by("Tune Up").composer, "Eddie \"Cleanhead\" Vinson");
+        assert!(by("Tune Up").teaches.contains("Miles Davis"));
+        assert_eq!(by("Solar").composer, "Chuck Wayne");
+        assert!(by("Solar").teaches.contains("Miles Davis"));
     }
 
     /// The jam tempos are how the tunes are actually played, inside the range
@@ -201,10 +241,18 @@ mod tests {
         }
     }
 
+    /// All the Things You Are spent a while listed "study by ear" with no
+    /// chart; now that its 36 bars are in the progression catalogue, every
+    /// standard is playable — and this keeps it that way.
     #[test]
-    fn a_standard_without_changes_says_so_rather_than_pointing_nowhere() {
-        let atya = STANDARDS.iter().find(|s| s.title.starts_with("All the Things")).unwrap();
-        assert!(atya.progression_id.is_none());
+    fn every_standard_is_playable() {
+        for s in STANDARDS {
+            assert!(
+                s.progression_id.is_some(),
+                "{} has no changes to load",
+                s.title
+            );
+        }
     }
 
     #[test]
