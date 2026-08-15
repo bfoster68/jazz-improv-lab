@@ -74,7 +74,8 @@ tests-web/                Playwright suites for the browser app
 ```bash
 # Rust
 cd rust
-cargo test -p jazz-theory -p jazz-audio   # 126 tests, ~2s, no audio device needed
+cargo test -p jazz-theory -p jazz-audio   # 134 tests, ~2s, no audio device needed
+cargo test -p jazz-audio --features soundfont   # includes the SoundFont paths
 cargo check --workspace                  # includes the Bevy app
 cargo run -p jazz-audio --bin render-wav -- --list
 cargo run -p jazz-audio --bin render-wav -- bluebossa --tempo 150   # hear the engine
@@ -122,8 +123,19 @@ cd docs && node build-docx.js
 
 ## Where things stand
 
-Last verified state: **126 tests pass**, `cargo check --workspace` is clean with no
-warnings, and `jazz-app` builds and links.
+Last verified state: **134 tests pass** (85 theory + 49 audio), `cargo check
+--workspace` is clean with no warnings, and `jazz-app` builds, links, and has
+been run and heard on real hardware.
+
+Since then, in this order: fixed invisible UI text (bevy_egui needs the
+`default_fonts` feature); anchored the transport to an `epoch` so restarting or
+changing progressions cannot dump every bar at once; added Piano, Guitar, Sax,
+Trombone and Trumpet with per-part instrument selection and an optional horn
+section; bundled FluidR3 GM (fetched by `crates/jazz-app/assets/fetch-soundfont.ps1`,
+gitignored) so all pitched parts play from real samples while drums stay synth;
+made the mixer clock f64 (the f32 clock warped tempo after ~4 minutes and froze
+near 512 s); routed the SoundFont through the master volume; and made live mix
+changes re-queue from the next bar without silencing the current one.
 
 Recently done, in order:
 1. Ported the musical core to Rust (`jazz-theory`, `jazz-audio`) with tests that
