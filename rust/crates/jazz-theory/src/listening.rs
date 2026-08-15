@@ -54,7 +54,7 @@ pub const ALSO_EXPLORE: &str =
      Wynton Marsalis.";
 
 /// A tune worth knowing, and why.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Standard {
     pub title: &'static str,
     pub composer: &'static str,
@@ -63,41 +63,47 @@ pub struct Standard {
     /// Id of the matching progression in [`crate::progression::all`], when the
     /// changes are playable here.
     pub progression_id: Option<&'static str>,
+    /// An idiomatic jam tempo in bpm — how the tune is actually played, so a
+    /// one-click jam starts at the right speed instead of whatever the tempo
+    /// slider was left on.
+    pub tempo: f32,
+    /// Whether the tune swings; `false` means straight eighths (Latin feel).
+    pub swing: bool,
 }
 
 pub const STANDARDS: &[Standard] = &[
     Standard { title: "So What", composer: "Miles Davis",
         key_and_form: "D Dorian - 32-bar AABA",
         teaches: "Modal soloing and the power of space.",
-        progression_id: Some("sowhat") },
+        progression_id: Some("sowhat"), tempo: 136.0, swing: true },
     Standard { title: "Blue Bossa", composer: "Kenny Dorham",
         key_and_form: "C minor - 16 bars",
         teaches: "Minor ii-V-i, a key change, and Latin feel.",
-        progression_id: Some("bluebossa") },
+        progression_id: Some("bluebossa"), tempo: 150.0, swing: false },
     Standard { title: "Take the A Train", composer: "Billy Strayhorn",
         key_and_form: "C major - 32-bar AABA",
         teaches: "Ellington's theme, written by Strayhorn; the famous D7(#11).",
-        progression_id: Some("atrain") },
+        progression_id: Some("atrain"), tempo: 160.0, swing: true },
     Standard { title: "Rhythm Changes (from \"I Got Rhythm\")", composer: "George Gershwin",
         key_and_form: "played in Bb - 32-bar AABA",
         teaches: "Fast ii-Vs plus a dominant-cycle bridge - the bebop proving ground.",
-        progression_id: Some("rhythmfull") },
+        progression_id: Some("rhythmfull"), tempo: 220.0, swing: true },
     Standard { title: "Autumn Leaves", composer: "Joseph Kosma",
         key_and_form: "G minor / Bb - 32 bars",
         teaches: "Major and minor ii-V-I side by side.",
-        progression_id: Some("autumn") },
+        progression_id: Some("autumn"), tempo: 120.0, swing: true },
     Standard { title: "Blues (Now's the Time)", composer: "Charlie Parker",
         key_and_form: "F - 12-bar blues",
         teaches: "The foundation - feel plus chord tones.",
-        progression_id: Some("blues") },
+        progression_id: Some("blues"), tempo: 145.0, swing: true },
     Standard { title: "Giant Steps", composer: "John Coltrane",
         key_and_form: "B major - 16 bars",
         teaches: "The major-third matrix; the ultimate changes-running challenge. (Plays here as the same cycle in C.)",
-        progression_id: Some("coltrane") },
+        progression_id: Some("coltrane"), tempo: 230.0, swing: true },
     Standard { title: "All the Things You Are", composer: "Jerome Kern",
         key_and_form: "Ab major - 36 bars",
         teaches: "Chord roots cycling in fourths through shifting key centres.",
-        progression_id: None },
+        progression_id: None, tempo: 130.0, swing: true },
 ];
 
 #[cfg(test)]
@@ -157,6 +163,25 @@ mod tests {
         assert_eq!(by("Autumn Leaves").composer, "Joseph Kosma");
         assert_eq!(by("Giant Steps").composer, "John Coltrane");
         assert_eq!(by("All the Things").composer, "Jerome Kern");
+    }
+
+    /// The jam tempos are how the tunes are actually played, inside the range
+    /// the transport can play. The two easy to get wrong: a bossa does not
+    /// swing, and rhythm changes without real tempo teaches the wrong lesson.
+    #[test]
+    fn jam_tempos_are_playable_and_idiomatic() {
+        for s in STANDARDS {
+            assert!(
+                (60.0..=280.0).contains(&s.tempo),
+                "{} has jam tempo {} outside the playable range",
+                s.title,
+                s.tempo
+            );
+        }
+        let bossa = STANDARDS.iter().find(|s| s.title == "Blue Bossa").unwrap();
+        assert!(!bossa.swing, "a bossa plays straight eighths, not swung");
+        let rc = STANDARDS.iter().find(|s| s.title.starts_with("Rhythm Changes")).unwrap();
+        assert!(rc.swing && rc.tempo >= 180.0, "rhythm changes is the fast-swing proving ground");
     }
 
     /// Every playable standard must point at a progression that really exists,

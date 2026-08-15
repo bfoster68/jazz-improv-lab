@@ -3,3 +3,5 @@ node_modules/
 *.wav
 *.pdf
 pg-*.jpg
+# SoundFonts are large binaries fetched locally, never committed.
+*.sf2

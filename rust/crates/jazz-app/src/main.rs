@@ -16,7 +16,7 @@ use jazz_theory::drill::{self, DRILL_IDS};
 use jazz_theory::harmony::{render_scale, find_scale, SCALES};
 use jazz_theory::note::{pc_name, use_sharp_for_root};
 use jazz_theory::ear::{self, Mode as EarMode, Question};
-use jazz_theory::listening::{ALSO_EXPLORE, MASTERS, STANDARDS};
+use jazz_theory::listening::{Standard, ALSO_EXPLORE, MASTERS, STANDARDS};
 use jazz_theory::progression::{self, Bar, Progression};
 use jazz_audio::voice::Instrument;
 
@@ -45,6 +45,17 @@ struct AppState {
     settings: Settings,
     /// How many bars of the form have been queued to the audio thread.
     scheduled_bars: usize,
+    /// The tempo shown while the slider is mid-drag. `settings.tempo` — which
+    /// the scheduler reads live — only changes when the drag commits, because
+    /// changing `bar_len` under an un-requeued transport schedules bars into the
+    /// past and they all sound at once.
+    pending_tempo: Option<f32>,
+    /// Audio-clock time (seconds) at which the current transport started. The
+    /// mixer clock free-runs and is never reset, so bars must be scheduled
+    /// relative to this epoch rather than to absolute zero — otherwise a restart
+    /// after the clock has advanced queues every bar in the past and the mixer
+    /// dumps them all at once.
+    epoch: f32,
     sched_rng: Rng,
 }
 
@@ -111,6 +122,8 @@ fn main() {
             bars,
             settings: Settings::default(),
             scheduled_bars: 0,
+            pending_tempo: None,
+            epoch: 0.0,
             sched_rng: Rng::new(0xC0FFEE),
         })
         .insert_resource(ClearColor(Color::srgb(0.06, 0.07, 0.09)))
@@ -155,13 +168,6 @@ struct AudioStream {
     core: Option<AudioCore>,
 }
 
-/// Where to look for an optional General MIDI SoundFont.
-///
-/// Drop any `.sf2` here and pitched instruments render from real samples instead
-/// of synthesis; drums stay synthesised either way. Absent or unreadable files are
-/// ignored, so this can never cost you audio.
-const SOUNDFONT_PATH: &str = "assets/soundfont.sf2";
-
 /// Browsers block audio until the user interacts with the page, so the stream is
 /// opened on the first click or key press. Native behaves identically, which keeps
 /// one code path for both.
@@ -179,14 +185,10 @@ fn start_audio_on_first_interaction(
         || keys.get_just_pressed().next().is_some()
         || touches.iter_just_pressed().next().is_some();
     if interacted {
-        if let Some(mut core) = stream.core.take() {
-            match jazz_audio::soundfont::SoundfontVoices::load(SOUNDFONT_PATH, SAMPLE_RATE) {
-                Ok(sf) => {
-                    info_once(&format!("using soundfont {SOUNDFONT_PATH}"));
-                    core.set_soundfont(Some(sf));
-                }
-                Err(why) => info_once(&format!("built-in synth ({why})")),
-            }
+        if let Some(core) = stream.core.take() {
+            // The SoundFont is loaded inside `start_audio`, once the device's real
+            // sample rate is known — loading it at the wrong rate plays every
+            // sample transposed.
             match start_audio(core) {
                 Ok(s) => stream.stream = Some(s),
                 Err((core, why)) => {
@@ -199,6 +201,22 @@ fn start_audio_on_first_interaction(
     let _ = &audio;
 }
 
+/// Find the bundled SoundFont, looking next to the executable first (how a
+/// shipped build carries it) and then in the dev-tree locations.
+fn find_soundfont() -> Option<std::path::PathBuf> {
+    use std::path::PathBuf;
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("soundfont.sf2"));
+            candidates.push(dir.join("assets/soundfont.sf2"));
+        }
+    }
+    candidates.push(PathBuf::from("assets/soundfont.sf2"));
+    candidates.push(PathBuf::from("crates/jazz-app/assets/soundfont.sf2"));
+    candidates.into_iter().find(|p| p.is_file())
+}
+
 /// Keep at least a couple of bars queued ahead of the play head.
 ///
 /// This runs on the Bevy schedule and only ever *sends*; the audio thread is never
@@ -207,14 +225,20 @@ fn keep_audio_fed(audio: Res<Audio>, mut state: ResMut<AppState>) {
     if !audio.0.is_playing() || state.bars.is_empty() {
         return;
     }
+    // Borrow fields directly rather than cloning the form every frame; this
+    // runs 60x a second and usually schedules nothing.
+    let state = &mut *state;
     let bar_len = 4.0 * 60.0 / state.settings.tempo;
     let now = audio.0.time();
-    let bars = state.bars.clone();
+    let epoch = state.epoch;
     let settings = state.settings;
-    while (state.scheduled_bars as f32) * bar_len < now + bar_len * 2.0 {
+    // Keep a few bars queued ahead of the play head. Bar `i` sounds at
+    // `epoch + i * bar_len`, so the whole form stays anchored to wherever the
+    // free-running mixer clock was when this transport started.
+    while epoch + (state.scheduled_bars as f32) * bar_len < now + bar_len * 4.0 {
         let i = state.scheduled_bars;
-        let plan = plan_bar(&bars, i, &settings, &mut state.sched_rng);
-        audio.0.schedule(plan, i as f32 * bar_len);
+        let plan = plan_bar(&state.bars, i, &settings, &mut state.sched_rng);
+        audio.0.schedule(plan, epoch + i as f32 * bar_len);
         state.scheduled_bars += 1;
     }
 }
@@ -311,27 +335,27 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
 
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        if ui
-            .add(egui::Slider::new(&mut state.settings.tempo, 50.0..=280.0).text("bpm"))
-            .changed()
-        {
-            // a tempo change re-times every future bar, so requeue from here
-            requeue(state, audio);
+        // The slider edits a staging copy; `settings.tempo` (which the scheduler
+        // reads every frame) only changes at the commit points below. Mutating it
+        // mid-drag would shrink `bar_len` under the already-anchored transport
+        // and queue a burst of bars into the past.
+        let mut tempo = state.pending_tempo.unwrap_or(state.settings.tempo);
+        let resp = ui.add(egui::Slider::new(&mut tempo, 50.0..=280.0).text("bpm"));
+        if resp.dragged() {
+            state.pending_tempo = Some(tempo);
+        } else if resp.drag_stopped() || resp.changed() {
+            // Commit on release or on a direct (typed/clicked) edit — and only
+            // requeue when the value actually changed, so a click that moves
+            // nothing does not restart the form.
+            state.pending_tempo = None;
+            if (tempo - state.settings.tempo).abs() > 0.01 {
+                state.settings.tempo = tempo;
+                requeue(state, audio);
+            }
         }
-        ui.checkbox(&mut state.settings.swing, "Swing");
-        ui.checkbox(&mut state.settings.bass, "Bass");
-        ui.checkbox(&mut state.settings.chords, "Chords");
-        ui.checkbox(&mut state.settings.drums, "Drums");
-    });
-    ui.horizontal(|ui| {
-        ui.label("Comping");
-        egui::ComboBox::from_id_salt("comping")
-            .selected_text(format!("{:?}", state.settings.density))
-            .show_ui(ui, |ui| {
-                for d in [Density::Sparse, Density::Medium, Density::Busy] {
-                    ui.selectable_value(&mut state.settings.density, d, format!("{d:?}"));
-                }
-            });
+        if ui.checkbox(&mut state.settings.swing, "Swing").changed() {
+            resync(state, audio);
+        }
         if ui
             .add(egui::Slider::new(&mut state.volume, 0.0..=1.5).text("Volume"))
             .changed()
@@ -339,6 +363,35 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
             audio.0.set_volume(state.volume);
         }
     });
+
+    // ---- per-part mixer: pick the instrument and on/off for each part ----
+    let mut dirty = false;
+    ui.horizontal(|ui| {
+        dirty |= ui.checkbox(&mut state.settings.bass, "Bass").changed();
+        dirty |= instrument_combo(ui, "bass_inst", &mut state.settings.bass_inst, &Instrument::BASS_CHOICES);
+    });
+    ui.horizontal(|ui| {
+        dirty |= ui.checkbox(&mut state.settings.chords, "Comp").changed();
+        dirty |= instrument_combo(ui, "comp_inst", &mut state.settings.comp_inst, &Instrument::COMP_CHOICES);
+        ui.label("  Feel");
+        egui::ComboBox::from_id_salt("comping")
+            .selected_text(format!("{:?}", state.settings.density))
+            .show_ui(ui, |ui| {
+                for d in [Density::Sparse, Density::Medium, Density::Busy] {
+                    dirty |= ui.selectable_value(&mut state.settings.density, d, format!("{d:?}")).changed();
+                }
+            });
+    });
+    ui.horizontal(|ui| {
+        dirty |= ui.checkbox(&mut state.settings.horns, "Horns").changed();
+        dirty |= instrument_combo(ui, "horn_inst", &mut state.settings.horn_inst, &Instrument::HORN_CHOICES);
+    });
+    ui.horizontal(|ui| {
+        dirty |= ui.checkbox(&mut state.settings.drums, "Drums").changed();
+    });
+    if dirty {
+        resync(state, audio);
+    }
 
     ui.separator();
 
@@ -348,7 +401,8 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     }
     let bar_len = 4.0 * 60.0 / state.settings.tempo;
     let current = if playing {
-        ((audio.0.time() / bar_len) as usize) % bars.len()
+        let elapsed = (audio.0.time() - state.epoch).max(0.0);
+        ((elapsed / bar_len) as usize) % bars.len()
     } else {
         0
     };
@@ -400,18 +454,62 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
 /// Load a progression's changes and (re)start the transport from its top.
 fn load_progression(state: &mut AppState, audio: &Audio, index: usize, play: bool) {
     state.bars = state.progs[index].bars.clone();
-    state.scheduled_bars = 0;
-    audio.0.clear();
-    audio.0.set_playing(play);
+    restart_transport(state, audio, play);
 }
 
 /// Requeue from the top after something that changes future timing.
 fn requeue(state: &mut AppState, audio: &Audio) {
     if audio.0.is_playing() {
-        state.scheduled_bars = 0;
-        audio.0.clear();
-        audio.0.set_playing(true);
+        restart_transport(state, audio, true);
     }
+}
+
+/// Re-queue the *upcoming* bars after a live mix change (instrument swap, part
+/// toggle, feel/swing change) without restarting the form, moving the clock, or
+/// cutting the note currently under the player's ear. The change is audible from
+/// the next bar.
+fn resync(state: &mut AppState, audio: &Audio) {
+    if !audio.0.is_playing() {
+        return;
+    }
+    let bar_len = 4.0 * 60.0 / state.settings.tempo;
+    let elapsed = (audio.0.time() - state.epoch).max(0.0);
+    let next_bar = (elapsed / bar_len) as usize + 1;
+    // Drop only what is queued from the next bar boundary on — the remainder of
+    // the current bar keeps playing with the old settings — then reschedule from
+    // that boundary.
+    audio.0.clear_pending_from(state.epoch + next_bar as f32 * bar_len);
+    state.scheduled_bars = next_bar;
+}
+
+/// A dropdown of instruments for one part. Returns whether the choice changed.
+fn instrument_combo(
+    ui: &mut egui::Ui,
+    id: &str,
+    current: &mut Instrument,
+    choices: &[Instrument],
+) -> bool {
+    let mut changed = false;
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(current.label())
+        .show_ui(ui, |ui| {
+            for &opt in choices {
+                changed |= ui.selectable_value(current, opt, opt.label()).changed();
+            }
+        });
+    changed
+}
+
+/// Reset the transport to bar 1, anchored to the current clock position.
+///
+/// The mixer clock free-runs and is never rewound, so the new form must start
+/// from `now`, not from absolute zero — otherwise every re-queued bar lands in
+/// the past and sounds at once.
+fn restart_transport(state: &mut AppState, audio: &Audio, play: bool) {
+    audio.0.clear();
+    state.scheduled_bars = 0;
+    state.epoch = audio.0.time();
+    audio.0.set_playing(play);
 }
 
 fn theory_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
@@ -663,14 +761,16 @@ fn listening_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
         ui.heading("Essential standards");
         ui.label(
             egui::RichText::new(
-                "Learn the melody and the changes, then improvise. Play loads the changes \
-                 straight into the Play-Along tab.",
+                "Learn the melody and the changes, then improvise. \"Comp me\" starts a \
+                 sparse trio behind your solo; \"Full band\" adds the horn section. Both \
+                 load the tune into Play-Along at its own tempo and feel.",
             )
             .weak(),
         );
         ui.add_space(6.0);
 
-        let mut load: Option<&'static str> = None;
+        // Defer the load until after the loop so `state` is not borrowed twice.
+        let mut load: Option<(&'static Standard, bool)> = None;
         for st in STANDARDS {
             ui.group(|ui| {
                 ui.horizontal(|ui| {
@@ -678,9 +778,12 @@ fn listening_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
                     ui.label(egui::RichText::new(format!("\u{2014} {}", st.composer)).weak());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         match st.progression_id {
-                            Some(id) => {
-                                if ui.button("\u{25B6} Play").clicked() {
-                                    load = Some(id);
+                            Some(_) => {
+                                if ui.button("\u{25B6} Full band").clicked() {
+                                    load = Some((st, true));
+                                }
+                                if ui.button("Comp me").clicked() {
+                                    load = Some((st, false));
                                 }
                             }
                             None => {
@@ -694,22 +797,31 @@ fn listening_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
             });
         }
 
-        if let Some(id) = load {
-            if let Some(i) = state.progs.iter().position(|p| p.id == id) {
-                state.prog_index = i;
-                load_progression(state, audio, i, true);
-                state.tab = Tab::PlayAlong;
-            }
+        if let Some((st, full_band)) = load {
+            start_jam(state, audio, st, full_band);
         }
     });
 }
 
-/// Print a one-off note about which sound engine is in use.
-fn info_once(msg: &str) {
-    use std::sync::Once;
-    static ONCE: Once = Once::new();
-    let owned = msg.to_string();
-    ONCE.call_once(move || println!("[audio] {owned}"));
+/// Start jamming a standard: apply its idiomatic tempo and feel, set the band
+/// up for the chosen mode — a sparse comping trio that leaves room for the
+/// student's solo, or the full band with the horn section — and drop into the
+/// Play-Along tab already playing. The chosen instruments (comp voice, bass,
+/// horns) are the user's own from the per-part mixer.
+fn start_jam(state: &mut AppState, audio: &Audio, st: &Standard, full_band: bool) {
+    let Some(id) = st.progression_id else { return };
+    let Some(i) = state.progs.iter().position(|p| p.id == id) else { return };
+    state.prog_index = i;
+    state.settings.tempo = st.tempo;
+    state.pending_tempo = None;
+    state.settings.swing = st.swing;
+    state.settings.bass = true;
+    state.settings.chords = true;
+    state.settings.drums = true;
+    state.settings.horns = full_band;
+    state.settings.density = if full_band { Density::Medium } else { Density::Sparse };
+    load_progression(state, audio, i, true);
+    state.tab = Tab::PlayAlong;
 }
 
 /// Open the default output device and hand the core to the callback.
@@ -728,9 +840,28 @@ fn start_audio(mut core: AudioCore) -> Result<cpal::Stream, (AudioCore, String)>
         Err(e) => return Err((core, format!("no usable output config: {e}"))),
     };
     let channels = config.channels() as usize;
+    let rate = config.sample_rate().0 as f32;
+    println!(
+        "[audio] output device: {} @ {} Hz",
+        device.name().unwrap_or_else(|_| "default device".into()),
+        config.sample_rate().0
+    );
     // Follow the device rather than assuming 44.1 kHz; a 48 kHz device would
     // otherwise play everything about a tone sharp and correspondingly fast.
-    core.set_sample_rate(config.sample_rate().0 as f32);
+    core.set_sample_rate(rate);
+
+    // Load the SoundFont at the real device rate so its samples are not
+    // transposed. Pitched instruments then play from FluidR3; drums stay synth.
+    match find_soundfont() {
+        Some(path) => match jazz_audio::soundfont::SoundfontVoices::load(&path, rate) {
+            Ok(sf) => {
+                println!("[audio] using soundfont {}", path.display());
+                core.set_soundfont(Some(sf));
+            }
+            Err(why) => println!("[audio] built-in synth ({why})"),
+        },
+        None => println!("[audio] built-in synth (no soundfont found)"),
+    }
 
     let mut core = core;
     let built = device.build_output_stream(
