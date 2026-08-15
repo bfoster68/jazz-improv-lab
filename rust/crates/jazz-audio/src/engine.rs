@@ -183,13 +183,22 @@ pub struct BarPlan {
 }
 
 /// Settings for the rhythm section.
+///
+/// Each pitched part carries its own instrument so the play-along can be mixed
+/// like a small band: pick the bass, the comping voice and an optional horn
+/// section independently.
 #[derive(Debug, Clone, Copy)]
 pub struct Settings {
     pub tempo: f32,
     pub swing: bool,
     pub density: Density,
     pub bass: bool,
+    pub bass_inst: Instrument,
     pub chords: bool,
+    pub comp_inst: Instrument,
+    /// A sustained horn-section pad over the changes.
+    pub horns: bool,
+    pub horn_inst: Instrument,
     pub drums: bool,
 }
 
@@ -200,7 +209,11 @@ impl Default for Settings {
             swing: true,
             density: Density::Medium,
             bass: true,
+            bass_inst: Instrument::Bass,
             chords: true,
+            comp_inst: Instrument::Keys,
+            horns: false,
+            horn_inst: Instrument::Sax,
             drums: true,
         }
     }
@@ -236,7 +249,7 @@ pub fn plan_bar(
                     midi: walk[beat],
                     gain: 0.175,
                     dur: spb * 1.6,
-                    instrument: Instrument::Bass,
+                    instrument: settings.bass_inst,
                 });
             }
         } else {
@@ -246,7 +259,7 @@ pub fn plan_bar(
                     midi: m,
                     gain: 0.165,
                     dur: spb * 0.8,
-                    instrument: Instrument::Bass,
+                    instrument: settings.bass_inst,
                 });
             }
             if rng.chance(0.3) {
@@ -257,7 +270,7 @@ pub fn plan_bar(
                     midi: clamp_bass(walk[3] + step),
                     gain: 0.13,
                     dur: spb * 0.38,
-                    instrument: Instrument::Bass,
+                    instrument: settings.bass_inst,
                 });
             }
         }
@@ -272,7 +285,7 @@ pub fn plan_bar(
         let vnext = comp_voicing(&next.chord_at(0), rng);
         if plan.two_feel {
             for &m in &v1 {
-                plan.notes.push(Event { offset: 0.0, midi: m, gain: 0.055, dur: spb * 1.5, instrument: Instrument::Keys });
+                plan.notes.push(Event { offset: 0.0, midi: m, gain: 0.055, dur: spb * 1.5, instrument: settings.comp_inst });
             }
         } else {
             let p = pool(settings.density);
@@ -285,9 +298,37 @@ pub fn plan_bar(
                 let voicing = if slot == 7 { &vnext } else if beat >= 2 { &v2 } else { &v1 };
                 let (gain, dur) = if on_and { (0.053, spb * 0.65) } else { (0.060, spb * 0.85) };
                 for &m in voicing {
-                    plan.notes.push(Event { offset, midi: m, gain, dur, instrument: Instrument::Keys });
+                    plan.notes.push(Event { offset, midi: m, gain, dur, instrument: settings.comp_inst });
                 }
             }
+        }
+    }
+
+    // ---- horns (a sustained section pad over the changes) ----
+    if settings.horns {
+        let bar_dur = 4.0 * spb;
+        let octave = settings.horn_inst.section_octave();
+        // The horns roll their own dice, seeded per bar. Sharing the bar RNG
+        // would shift every later draw, so merely toggling the section would
+        // re-roll the walking bass and comping of the rest of the form — and an
+        // A/B render with and without `--horns` could never isolate the horns.
+        let mut horn_rng = Rng::new(0x484F_524E ^ (index as u64).wrapping_mul(0x9E37_79B9));
+        let mut pad = |slot: &Slot, offset: f32, dur: f32, rng: &mut Rng| {
+            for &m in &comp_voicing(slot, rng) {
+                plan.notes.push(Event {
+                    offset,
+                    midi: m + octave,
+                    gain: 0.06,
+                    dur,
+                    instrument: settings.horn_inst,
+                });
+            }
+        };
+        if bar.is_split() {
+            pad(&bar.chord_at(0), 0.0, 2.0 * spb, &mut horn_rng);
+            pad(&bar.chord_at(2), 2.0 * spb, 2.0 * spb, &mut horn_rng);
+        } else {
+            pad(&bar.chord_at(0), 0.0, bar_dur, &mut horn_rng);
         }
     }
 
@@ -464,6 +505,72 @@ mod tests {
         let s = Settings { bass: false, chords: false, drums: false, ..Settings::default() };
         let plan = plan_bar(&bars, 0, &s, &mut rng);
         assert!(plan.notes.is_empty() && plan.perc.is_empty());
+    }
+
+    #[test]
+    fn each_part_plays_its_chosen_instrument() {
+        let bars = progression::two_five_one(0);
+        let mut rng = Rng::new(3);
+        let s = Settings {
+            bass_inst: Instrument::Trombone,
+            comp_inst: Instrument::Guitar,
+            ..Settings::default()
+        };
+        // Sweep several bars so two-feel randomness cannot hide a part.
+        let mut used = std::collections::HashSet::new();
+        for i in 0..64 {
+            for e in plan_bar(&bars, i, &s, &mut rng).notes {
+                used.insert(e.instrument);
+            }
+        }
+        assert!(used.contains(&Instrument::Trombone), "bass part ignored its instrument");
+        assert!(used.contains(&Instrument::Guitar), "comping ignored its instrument");
+        // The two-feel branch once kept a hardcoded Rhodes: with every part
+        // assigned elsewhere, no event may fall back to the default voice.
+        assert!(
+            !used.contains(&Instrument::Keys),
+            "some bars fell back to the default comp instrument"
+        );
+    }
+
+    #[test]
+    fn toggling_horns_does_not_reroll_the_rhythm_section() {
+        // The horn pad draws from its own per-bar RNG. If it shared the bar RNG,
+        // enabling horns would shift every later draw and silently rewrite the
+        // walking bass and comping of the whole form.
+        let bars = progression::two_five_one(0);
+        let band = |horns: bool| {
+            let mut rng = Rng::new(11);
+            let s = Settings { horns, ..Settings::default() };
+            (0..16)
+                .flat_map(|i| plan_bar(&bars, i, &s, &mut rng).notes)
+                .filter(|e| e.instrument != Settings::default().horn_inst)
+                .map(|e| (e.midi, (e.offset * 1000.0) as i32))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(band(false), band(true), "enabling horns changed the bass/comping");
+    }
+
+    #[test]
+    fn the_horn_section_sounds_only_when_enabled() {
+        let bars = progression::two_five_one(0);
+        let mut rng = Rng::new(7);
+        // Off by default: no horn voice anywhere.
+        let off = Settings::default();
+        for i in 0..16 {
+            let plan = plan_bar(&bars, i, &off, &mut rng);
+            assert!(
+                plan.notes.iter().all(|e| e.instrument != Instrument::Sax),
+                "horns sounded while disabled"
+            );
+        }
+        // Enabled: the chosen horn instrument appears.
+        let on = Settings { horns: true, horn_inst: Instrument::Trumpet, ..Settings::default() };
+        let plan = plan_bar(&bars, 0, &on, &mut rng);
+        assert!(
+            plan.notes.iter().any(|e| e.instrument == Instrument::Trumpet),
+            "horn section produced no notes"
+        );
     }
 
     #[test]

@@ -11,8 +11,83 @@
 use std::io::Write;
 
 use jazz_audio::engine::{plan_bar, Density, Rng, Settings};
+use jazz_audio::voice::Instrument;
 use jazz_audio::Mixer;
 use jazz_theory::progression;
+
+/// Map a name on the command line to an instrument. The canonical names come
+/// from the same list the app's menus use, so a newly added instrument is
+/// accepted here without touching this file; an unknown name is an error, not a
+/// silent fallback to the wrong sound.
+fn parse_instrument(name: &str) -> Instrument {
+    let found = match name.to_ascii_lowercase().as_str() {
+        "keys" | "ep" | "rhodes" => Some(Instrument::Keys),
+        "bone" => Some(Instrument::Trombone),
+        other => Instrument::ALL.iter().copied().find(|i| i.label().eq_ignore_ascii_case(other)),
+    };
+    match found {
+        Some(i) => i,
+        None => {
+            let names: Vec<&str> = Instrument::ALL.iter().map(|i| i.label()).collect();
+            eprintln!("Unknown instrument '{name}'. Choices: {}", names.join(", "));
+            std::process::exit(2);
+        }
+    }
+}
+
+/// Render a form through the SoundFont by driving the *real* playback path —
+/// the same [`AudioCore`] the app's audio callback owns — so this WAV is exactly
+/// what the app plays, and a change to the live mix can never silently diverge
+/// from the offline audition.
+#[cfg(feature = "soundfont")]
+fn render_with_soundfont(
+    path: &str,
+    bars: &[progression::Bar],
+    settings: &Settings,
+    seed: u64,
+    total_bars: usize,
+    bar_len: f32,
+    sr: f32,
+    tail: f32,
+) -> Vec<f32> {
+    use jazz_audio::soundfont::SoundfontVoices;
+    use jazz_audio::stream::AudioCore;
+
+    let sf = match SoundfontVoices::load(path, sr) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("could not load soundfont '{path}': {e}");
+            std::process::exit(2);
+        }
+    };
+    let (handle, mut core) = AudioCore::new(sr);
+    core.set_soundfont(Some(sf));
+    handle.set_playing(true);
+    let mut rng = Rng::new(seed);
+    for i in 0..total_bars {
+        handle.schedule(plan_bar(bars, i, settings, &mut rng), i as f32 * bar_len);
+    }
+    let mut out = vec![0.0f32; (tail * sr) as usize];
+    for chunk in out.chunks_mut(512) {
+        core.fill(chunk, 1);
+    }
+    out
+}
+
+#[cfg(not(feature = "soundfont"))]
+fn render_with_soundfont(
+    _path: &str,
+    _bars: &[progression::Bar],
+    _settings: &Settings,
+    _seed: u64,
+    _total_bars: usize,
+    _bar_len: f32,
+    _sr: f32,
+    _tail: f32,
+) -> Vec<f32> {
+    eprintln!("--soundfont requires building with --features soundfont");
+    std::process::exit(2);
+}
 
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -31,6 +106,7 @@ fn main() -> std::io::Result<()> {
     let mut settings = Settings::default();
     let mut choruses = 1usize;
     let mut seed = 20_260_808u64;
+    let mut sf_path: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -50,6 +126,13 @@ fn main() -> std::io::Result<()> {
             "--no-bass" => settings.bass = false,
             "--no-chords" => settings.chords = false,
             "--no-drums" => settings.drums = false,
+            "--horns" => settings.horns = true,
+            "--soundfont" => sf_path = Some(val(&mut i)),
+            // `-inst` suffixes so none of these collide with the `--no-*` part
+            // toggles: a bare `--bass <name>` would swallow the progression id.
+            "--horn-inst" => settings.horn_inst = parse_instrument(&val(&mut i)),
+            "--comp-inst" => settings.comp_inst = parse_instrument(&val(&mut i)),
+            "--bass-inst" => settings.bass_inst = parse_instrument(&val(&mut i)),
             other if !other.starts_with('-') => id = other.to_string(),
             other => eprintln!("(ignoring unknown flag {other})"),
         }
@@ -69,15 +152,21 @@ fn main() -> std::io::Result<()> {
 
     const SR: f32 = 44_100.0;
     let bar_len = 4.0 * 60.0 / settings.tempo;
-    let mut mixer = Mixer::new(SR);
-    let mut rng = Rng::new(seed);
-
     let total_bars = prog.bars.len() * choruses;
-    for i in 0..total_bars {
-        let plan = plan_bar(&prog.bars, i, &settings, &mut rng);
-        mixer.schedule(&plan, i as f32 * bar_len);
-    }
-    let samples = mixer.render(total_bars as f32 * bar_len + 2.0);
+    let tail = total_bars as f32 * bar_len + 2.0;
+
+    let samples = match &sf_path {
+        Some(path) => render_with_soundfont(path, &prog.bars, &settings, seed, total_bars, bar_len, SR, tail),
+        None => {
+            let mut mixer = Mixer::new(SR);
+            let mut rng = Rng::new(seed);
+            for i in 0..total_bars {
+                let plan = plan_bar(&prog.bars, i, &settings, &mut rng);
+                mixer.schedule(&plan, i as f32 * bar_len);
+            }
+            mixer.render(tail)
+        }
+    };
 
     write_wav(&out, &samples, SR as u32)?;
 

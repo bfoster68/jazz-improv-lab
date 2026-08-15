@@ -47,7 +47,11 @@ enum Pending {
 /// cannot clip — the same job the compressor does in the browser version.
 pub struct Mixer {
     sample_rate: f32,
-    time: f32,
+    /// Seconds rendered so far. Accumulated in f64 deliberately: adding a
+    /// ~2e-5 s sample period to an f32 stops changing the value once the clock
+    /// passes a few hundred seconds (the ulp outgrows the step), which first
+    /// warps the tempo and then freezes playback outright a few minutes in.
+    time: f64,
     pending: Vec<Pending>,
     active_notes: Vec<Voice>,
     active_rides: Vec<Ride>,
@@ -78,6 +82,14 @@ impl Mixer {
 
     /// Queue everything in a bar plan, offset from `bar_start` seconds.
     pub fn schedule(&mut self, plan: &BarPlan, bar_start: f32) {
+        self.schedule_pitched(plan, bar_start);
+        self.schedule_perc(plan, bar_start);
+    }
+
+    /// Queue only the pitched notes of a bar. When a SoundFont is driving the
+    /// pitched instruments, those notes go to it instead and only the synth
+    /// percussion is scheduled here.
+    pub fn schedule_pitched(&mut self, plan: &BarPlan, bar_start: f32) {
         for e in &plan.notes {
             let v = Voice::new(
                 e.instrument,
@@ -88,6 +100,10 @@ impl Mixer {
             );
             self.pending.push(Pending::Note(bar_start + e.offset, v));
         }
+    }
+
+    /// Queue only the percussion of a bar. The drums always stay synthesised.
+    pub fn schedule_perc(&mut self, plan: &BarPlan, bar_start: f32) {
         for p in &plan.perc {
             let at = bar_start + p.offset;
             match p.kind {
@@ -123,7 +139,7 @@ impl Mixer {
     ) {
         let seed = self.next_seed();
         let v = Voice::new(instrument, midi_to_freq(midi as f32), gain, dur, seed);
-        self.pending.push(Pending::Note(self.time + delay.max(0.0), v));
+        self.pending.push(Pending::Note(self.time as f32 + delay.max(0.0), v));
     }
 
     /// Sound several notes together — a chord for ear training.
@@ -148,7 +164,29 @@ impl Mixer {
         self.active_perc.clear();
     }
 
+    /// Drop queued events due at or after `from` seconds, leaving everything
+    /// earlier — including the not-yet-started remainder of the current bar — in
+    /// place. Used to re-queue upcoming bars after a live mix change without
+    /// punching a hole in the bar under the player's ear.
+    pub fn clear_pending_from(&mut self, from: f32) {
+        self.pending.retain(|p| match p {
+            Pending::Note(t, _) | Pending::Ride(t, _) | Pending::Perc(t, _) => *t < from,
+        });
+    }
+
+    /// Whether any note is still waiting to start. The audio callback needs this
+    /// to know it is not truly idle even when nothing is sounding *yet* — a
+    /// one-off preview lives in `pending` until `tick` promotes it.
+    pub fn has_pending(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
     pub fn time(&self) -> f32 {
+        self.time as f32
+    }
+
+    /// The clock at full precision, for anything that converts it to samples.
+    pub fn time_f64(&self) -> f64 {
         self.time
     }
 
@@ -172,7 +210,7 @@ impl Mixer {
     /// Render one sample and advance the clock.
     pub fn tick(&mut self) -> f32 {
         let dt = 1.0 / self.sample_rate;
-        let now = self.time;
+        let now = self.time as f32;
 
         // promote anything whose time has come
         let mut i = 0;
@@ -205,7 +243,7 @@ impl Mixer {
         self.active_rides.retain(|r| !r.is_done());
         self.active_perc.retain(|p| !p.is_done());
 
-        self.time += dt;
+        self.time += dt as f64;
         soft_clip(sum * self.volume)
     }
 
@@ -243,6 +281,37 @@ mod tests {
     }
     fn rms(v: &[f32]) -> f32 {
         (v.iter().map(|x| x * x).sum::<f32>() / v.len().max(1) as f32).sqrt()
+    }
+
+    #[test]
+    fn the_clock_keeps_real_time_even_after_long_sessions() {
+        // Regression: accumulating f32 seconds one sample period at a time made
+        // the clock run ~46% fast past 256s and freeze entirely near 512s at
+        // 48 kHz — audible as tempo warble, then a total playback stall.
+        let mut m = Mixer::new(48_000.0);
+        m.time = 600.0; // ten minutes into a session
+        let before = m.time_f64();
+        for _ in 0..48_000 {
+            m.tick();
+        }
+        let advanced = m.time_f64() - before;
+        assert!(
+            (advanced - 1.0).abs() < 1e-3,
+            "one second of audio advanced the clock by {advanced}s"
+        );
+    }
+
+    #[test]
+    fn clear_pending_from_keeps_earlier_events() {
+        // A live mix change re-queues from the next bar; everything still due
+        // before that boundary must survive, or the current bar goes silent.
+        let mut m = Mixer::new(44_100.0);
+        m.play_note(Instrument::Vibes, 60, 0.5, 0.2, 0.5);
+        m.play_note(Instrument::Vibes, 64, 0.5, 0.2, 3.0);
+        m.clear_pending_from(2.0);
+        assert_eq!(m.pending.len(), 1, "the pre-cutoff note must remain queued");
+        let heard = m.render(1.0);
+        assert!(peak(&heard) > 0.01, "the note before the cutoff never sounded");
     }
 
     #[test]

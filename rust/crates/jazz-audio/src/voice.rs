@@ -46,14 +46,74 @@ fn attack(t: f32, len: f32) -> f32 {
 }
 
 /// Which instrument a note should be played on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Instrument {
-    /// FM electric piano — comping.
+    /// FM electric piano — the default Rhodes comping voice.
     Keys,
+    /// Acoustic grand piano — a brighter, hammered comping voice.
+    Piano,
+    /// Jazz guitar — plucked comping.
+    Guitar,
     /// Upright bass — walking lines.
     Bass,
+    /// Tenor saxophone — a sustained horn voice.
+    Sax,
+    /// Trombone — a mellow low brass horn voice.
+    Trombone,
+    /// Trumpet — a bright brass horn voice.
+    Trumpet,
     /// Vibraphone — drills, theory lab, ear training.
     Vibes,
+}
+
+impl Instrument {
+    /// Every instrument, in a stable order for building UI menus.
+    pub const ALL: [Instrument; 8] = [
+        Instrument::Keys,
+        Instrument::Piano,
+        Instrument::Guitar,
+        Instrument::Bass,
+        Instrument::Sax,
+        Instrument::Trombone,
+        Instrument::Trumpet,
+        Instrument::Vibes,
+    ];
+
+    /// A human-readable name for menus.
+    pub fn label(self) -> &'static str {
+        match self {
+            Instrument::Keys => "Rhodes",
+            Instrument::Piano => "Piano",
+            Instrument::Guitar => "Guitar",
+            Instrument::Bass => "Bass",
+            Instrument::Sax => "Sax",
+            Instrument::Trombone => "Trombone",
+            Instrument::Trumpet => "Trumpet",
+            Instrument::Vibes => "Vibes",
+        }
+    }
+
+    /// Instruments that suit comping (chordal) parts.
+    pub const COMP_CHOICES: [Instrument; 4] =
+        [Instrument::Keys, Instrument::Piano, Instrument::Guitar, Instrument::Vibes];
+
+    /// Instruments that suit a bass part.
+    pub const BASS_CHOICES: [Instrument; 2] = [Instrument::Bass, Instrument::Trombone];
+
+    /// Instruments that suit a sustained horn section.
+    pub const HORN_CHOICES: [Instrument; 3] =
+        [Instrument::Sax, Instrument::Trumpet, Instrument::Trombone];
+
+    /// Octave shift (in semitones) this instrument takes when it plays the horn
+    /// section, so each horn sits in its natural register. Kept on the
+    /// instrument rather than in the arranger: adding a horn choice then cannot
+    /// silently land it in the wrong octave.
+    pub fn section_octave(self) -> i32 {
+        match self {
+            Instrument::Trombone => -12,
+            _ => 0,
+        }
+    }
 }
 
 /// A sounding note.
@@ -92,7 +152,12 @@ impl Voice {
         self.dur
             + match self.instrument {
                 Instrument::Keys => 0.6,
+                Instrument::Piano => 0.9,
+                Instrument::Guitar => 0.7,
                 Instrument::Bass => 0.25,
+                Instrument::Sax => 0.18,
+                Instrument::Trombone => 0.2,
+                Instrument::Trumpet => 0.15,
                 Instrument::Vibes => 1.0,
             }
     }
@@ -109,11 +174,29 @@ impl Voice {
         }
         let out = match self.instrument {
             Instrument::Keys => self.keys(t),
+            Instrument::Piano => self.piano(t),
+            Instrument::Guitar => self.guitar(t),
             Instrument::Bass => self.bass(t),
+            Instrument::Sax => self.sax(t),
+            Instrument::Trombone => self.trombone(t),
+            Instrument::Trumpet => self.trumpet(t),
             Instrument::Vibes => self.vibes(t),
         };
         self.t += dt;
         out * self.gain
+    }
+
+    /// The shared held-then-released envelope: while the note is held the level
+    /// settles from 1.0 toward `floor` with time constant `tau`; after the hold
+    /// it releases exponentially over `release`. Every decaying voice uses this
+    /// one implementation, so a release fix lands everywhere at once.
+    #[inline]
+    fn env(&self, t: f32, floor: f32, tau: f32, release: f32) -> f32 {
+        if t < self.dur {
+            floor + (1.0 - floor) * decay(t, tau)
+        } else {
+            (floor + (1.0 - floor) * decay(self.dur, tau)) * decay(t - self.dur, release)
+        }
     }
 
     /// FM electric piano: a bell-like modulation index that decays into a sine
@@ -122,13 +205,7 @@ impl Voice {
         let index = 2.4 * decay(t, 0.09);
         let modulator = (TAU * self.freq * 2.0 * t).sin() * index;
         let body = (TAU * self.freq * t + modulator).sin();
-        let env = attack(t, 0.006)
-            * if t < self.dur {
-                0.35 + 0.65 * decay(t, 0.45)
-            } else {
-                (0.35 + 0.65 * decay(self.dur, 0.45)) * decay(t - self.dur, 0.18)
-            };
-        body * env * 0.5
+        body * attack(t, 0.006) * self.env(t, 0.35, 0.45, 0.18) * 0.5
     }
 
     /// Upright bass: pitch drop, fast filter-like harmonic decay, finger noise.
@@ -140,12 +217,7 @@ impl Voice {
         let tone = phase.sin()
             + 0.5 * bright * (2.0 * phase).sin()
             + 0.25 * bright * bright * (3.0 * phase).sin();
-        let env = attack(t, 0.008)
-            * if t < self.dur {
-                0.55 + 0.45 * decay(t, 0.30)
-            } else {
-                (0.55 + 0.45 * decay(self.dur, 0.30)) * decay(t - self.dur, 0.06)
-            };
+        let env = attack(t, 0.008) * self.env(t, 0.55, 0.30, 0.06);
         let finger = if t < 0.05 {
             self.noise.next() * decay(t, 0.012) * 0.25
         } else {
@@ -162,6 +234,82 @@ impl Voice {
             p.sin() + 0.30 * (4.0 * p).sin() * decay(t, 0.5) + 0.12 * (9.2 * p).sin() * decay(t, 0.25);
         let trem = 1.0 - 0.16 * (1.0 - (TAU * 4.4 * t).sin()) * 0.5;
         body * attack(t, 0.004) * decay(t, 0.9) * trem * 0.45
+    }
+
+    /// Acoustic grand: hammered harmonics that lose their upper partials as the
+    /// string settles, over a long decay. Brighter and plainer than the Rhodes.
+    fn piano(&self, t: f32) -> f32 {
+        let p = TAU * self.freq * t;
+        let bright = decay(t, 0.35);
+        let body = p.sin()
+            + 0.60 * bright * (2.0 * p).sin()
+            + 0.28 * bright * (3.0 * p).sin()
+            + 0.12 * bright * bright * (4.0 * p).sin();
+        body * attack(t, 0.004) * self.env(t, 0.30, 0.9, 0.15) * 0.34
+    }
+
+    /// Jazz guitar: a plucked pick transient over quickly darkening harmonics.
+    fn guitar(&mut self, t: f32) -> f32 {
+        let p = TAU * self.freq * t;
+        let bright = decay(t, 0.18);
+        let body =
+            p.sin() + 0.50 * bright * (2.0 * p).sin() + 0.22 * bright * (3.0 * p).sin();
+        let pick = if t < 0.02 { self.noise.next() * decay(t, 0.006) * 0.20 } else { 0.0 };
+        (body * 0.42 + pick) * attack(t, 0.003) * self.env(t, 0.35, 0.5, 0.08)
+    }
+
+    /// Tenor sax: reedy and hollow. Odd harmonics dominate (a clarinet-ish
+    /// hollowness), with a fairly deep vibrato and audible breath — a timbre
+    /// clearly apart from the brass.
+    fn sax(&mut self, t: f32) -> f32 {
+        let vib = 1.0 + 0.010 * (TAU * 5.6 * t).sin();
+        let p = TAU * self.freq * vib * t;
+        // 3rd and 5th (odd) pushed above the 2nd and 4th (even) => reedy/hollow.
+        let body = p.sin()
+            + 0.28 * (2.0 * p).sin()
+            + 0.52 * (3.0 * p).sin()
+            + 0.16 * (4.0 * p).sin()
+            + 0.30 * (5.0 * p).sin();
+        let breath = self.noise.next() * 0.05 * decay(t, 0.18);
+        let env = attack(t, 0.028) * self.sustain(t);
+        (body * 0.13 + breath) * env
+    }
+
+    /// Trombone: dark, round low brass. Almost all of its energy is in the
+    /// fundamental and 2nd partial; the section voices it an octave down (see the
+    /// engine), so it sits well below sax and trumpet.
+    fn trombone(&self, t: f32) -> f32 {
+        let vib = 1.0 + 0.004 * (TAU * 4.6 * t).sin();
+        let p = TAU * self.freq * vib * t;
+        let body = p.sin()
+            + 0.50 * (2.0 * p).sin()
+            + 0.16 * (3.0 * p).sin()
+            + 0.05 * (4.0 * p).sin();
+        body * attack(t, 0.045) * self.sustain(t) * 0.17
+    }
+
+    /// Trumpet: bright, buzzy brass. A tall stack of harmonics that opens up just
+    /// after a crisp attack — the brightest of the three by a wide margin.
+    fn trumpet(&self, t: f32) -> f32 {
+        let vib = 1.0 + 0.005 * (TAU * 5.6 * t).sin();
+        let p = TAU * self.freq * vib * t;
+        let open = 0.5 + 0.5 * (1.0 - decay(t, 0.04));
+        let body = p.sin()
+            + 0.70 * (2.0 * p).sin()
+            + 0.60 * (3.0 * p).sin()
+            + 0.50 * open * (4.0 * p).sin()
+            + 0.40 * open * (5.0 * p).sin()
+            + 0.28 * open * (6.0 * p).sin()
+            + 0.18 * open * (7.0 * p).sin();
+        body * attack(t, 0.018) * self.sustain(t) * 0.085
+    }
+
+    /// A held-then-released envelope for the sustained (wind/brass) voices:
+    /// full level while the note is held, a short exponential release after.
+    /// The degenerate `floor = 1.0` case of [`Voice::env`].
+    #[inline]
+    fn sustain(&self, t: f32) -> f32 {
+        self.env(t, 1.0, 1.0, 0.07)
     }
 }
 
@@ -291,7 +439,7 @@ mod tests {
 
     #[test]
     fn every_instrument_produces_sound_and_then_stops() {
-        for inst in [Instrument::Keys, Instrument::Bass, Instrument::Vibes] {
+        for inst in Instrument::ALL {
             let mut v = Voice::new(inst, 220.0, 0.5, 0.4, 7);
             let out = render(3.0, 44100.0, |dt| v.tick(dt));
             assert!(peak(&out) > 0.01, "{inst:?} produced silence");
@@ -302,7 +450,7 @@ mod tests {
 
     #[test]
     fn notes_start_from_silence_so_there_is_no_click() {
-        for inst in [Instrument::Keys, Instrument::Bass, Instrument::Vibes] {
+        for inst in Instrument::ALL {
             let mut v = Voice::new(inst, 220.0, 0.8, 0.4, 3);
             let first = v.tick(1.0 / 44100.0);
             assert!(first.abs() < 0.02, "{inst:?} starts at {first}, that will click");
@@ -351,7 +499,7 @@ mod tests {
 
     #[test]
     fn output_is_always_finite() {
-        for inst in [Instrument::Keys, Instrument::Bass, Instrument::Vibes] {
+        for inst in Instrument::ALL {
             for f in [55.0, 110.0, 440.0, 1760.0] {
                 let mut v = Voice::new(inst, f, 1.0, 0.5, 9);
                 let out = render(2.0, 44100.0, |dt| v.tick(dt));

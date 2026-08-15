@@ -39,8 +39,13 @@ pub enum Command {
         dur: f32,
         delay: f32,
     },
-    /// Silence everything immediately and reset the clock.
+    /// Silence everything immediately. The clock keeps running — the transport
+    /// re-anchors to it via its epoch, and must never be rewound.
     Clear,
+    /// Drop queued events due at or after `from` seconds, leaving earlier ones
+    /// (the rest of the current bar) and sounding notes untouched. Lets the UI
+    /// re-queue upcoming bars after a live mix change.
+    ClearPending { from: f32 },
     SetVolume(f32),
 }
 
@@ -51,13 +56,16 @@ pub struct AudioHandle {
     /// Play position in samples, published by the audio thread.
     playhead: Arc<AtomicU32>,
     playing: Arc<AtomicBool>,
-    sample_rate: f32,
+    /// The device's real sample rate in Hz, shared with the audio thread so the
+    /// clock stays honest when the device runs at 48 kHz rather than 44.1.
+    sample_rate: Arc<AtomicU32>,
 }
 
 impl AudioHandle {
     /// Seconds of audio rendered so far. Reading this never blocks the audio thread.
     pub fn time(&self) -> f32 {
-        self.playhead.load(Ordering::Relaxed) as f32 / self.sample_rate
+        let sr = self.sample_rate.load(Ordering::Relaxed).max(1) as f32;
+        self.playhead.load(Ordering::Relaxed) as f32 / sr
     }
 
     pub fn is_playing(&self) -> bool {
@@ -93,12 +101,17 @@ impl AudioHandle {
         self.send(Command::Clear);
     }
 
+    /// Drop queued events from `from` seconds on, keeping everything earlier.
+    pub fn clear_pending_from(&self, from: f32) {
+        self.send(Command::ClearPending { from });
+    }
+
     pub fn set_volume(&self, v: f32) {
         self.send(Command::SetVolume(v));
     }
 
     pub fn sample_rate(&self) -> f32 {
-        self.sample_rate
+        self.sample_rate.load(Ordering::Relaxed) as f32
     }
 }
 
@@ -108,6 +121,7 @@ pub struct AudioCore {
     rx: Receiver<Command>,
     playhead: Arc<AtomicU32>,
     playing: Arc<AtomicBool>,
+    sample_rate: Arc<AtomicU32>,
     #[cfg(feature = "soundfont")]
     sf: Option<crate::soundfont::SoundfontVoices>,
 }
@@ -119,18 +133,20 @@ impl AudioCore {
         let (tx, rx) = std::sync::mpsc::channel();
         let playhead = Arc::new(AtomicU32::new(0));
         let playing = Arc::new(AtomicBool::new(false));
+        let rate = Arc::new(AtomicU32::new(sample_rate as u32));
         (
             AudioHandle {
                 tx,
                 playhead: playhead.clone(),
                 playing: playing.clone(),
-                sample_rate,
+                sample_rate: rate.clone(),
             },
             AudioCore {
                 mixer: Mixer::new(sample_rate),
                 rx,
                 playhead,
                 playing,
+                sample_rate: rate,
                 #[cfg(feature = "soundfont")]
                 sf: None,
             },
@@ -140,6 +156,7 @@ impl AudioCore {
     /// Adopt the output device's actual sample rate, so playback is not transposed
     /// when the device runs at 48 kHz rather than 44.1.
     pub fn set_sample_rate(&mut self, rate: f32) {
+        self.sample_rate.store(rate as u32, Ordering::Relaxed);
         self.mixer.set_sample_rate(rate);
     }
 
@@ -149,34 +166,52 @@ impl AudioCore {
         self.sf = sf;
     }
 
+    /// Send one pitched note to whichever engine is active: the SoundFont when
+    /// one is loaded, the synthesis voices otherwise. The single place that
+    /// decision is made — every command path goes through here.
+    fn dispatch_note(&mut self, instrument: Instrument, midi: i32, gain: f32, dur: f32, at: f32) {
+        #[cfg(feature = "soundfont")]
+        if let Some(sf) = self.sf.as_mut() {
+            sf.note(instrument, midi, gain, dur, at);
+            return;
+        }
+        let delay = (at - self.mixer.time()).max(0.0);
+        self.mixer.play_note(instrument, midi, gain, dur, delay);
+    }
+
     fn drain(&mut self) {
         loop {
             match self.rx.try_recv() {
-                Ok(Command::Schedule { plan, at }) => self.mixer.schedule(&plan, at),
-                Ok(Command::Note { instrument, midi, gain, dur, delay }) => {
-                    #[cfg(feature = "soundfont")]
-                    if let Some(sf) = self.sf.as_mut() {
-                        sf.note(instrument, midi, gain, dur, self.mixer.time() + delay);
-                        continue;
+                Ok(Command::Schedule { plan, at }) => {
+                    // Pitched notes go to whichever engine is active; the drums
+                    // always stay synthesised.
+                    for e in &plan.notes {
+                        self.dispatch_note(e.instrument, e.midi, e.gain, e.dur, at + e.offset);
                     }
-                    self.mixer.play_note(instrument, midi, gain, dur, delay);
+                    self.mixer.schedule_perc(&plan, at);
+                }
+                Ok(Command::Note { instrument, midi, gain, dur, delay }) => {
+                    let at = self.mixer.time() + delay;
+                    self.dispatch_note(instrument, midi, gain, dur, at);
                 }
                 Ok(Command::Chord { instrument, midis, gain, dur, delay }) => {
-                    #[cfg(feature = "soundfont")]
-                    if let Some(sf) = self.sf.as_mut() {
-                        let t = self.mixer.time() + delay;
-                        for m in &midis {
-                            sf.note(instrument, *m, gain, dur, t);
-                        }
-                        continue;
+                    let at = self.mixer.time() + delay;
+                    for &m in &midis {
+                        self.dispatch_note(instrument, m, gain, dur, at);
                     }
-                    self.mixer.play_chord(instrument, &midis, gain, dur, delay);
                 }
                 Ok(Command::Clear) => {
                     self.mixer.clear();
                     #[cfg(feature = "soundfont")]
                     if let Some(sf) = self.sf.as_mut() {
                         sf.all_off();
+                    }
+                }
+                Ok(Command::ClearPending { from }) => {
+                    self.mixer.clear_pending_from(from);
+                    #[cfg(feature = "soundfont")]
+                    if let Some(sf) = self.sf.as_mut() {
+                        sf.clear_pending_from(from);
                     }
                 }
                 Ok(Command::SetVolume(v)) => self.mixer.volume = v.clamp(0.0, 1.5),
@@ -190,27 +225,47 @@ impl AudioCore {
     pub fn fill(&mut self, out: &mut [f32], channels: usize) {
         self.drain();
 
-        if !self.playing.load(Ordering::Relaxed) && self.mixer.active_count() == 0 {
+        // Only take the pure-silence fast path when nothing is sounding *and*
+        // nothing is waiting to sound. A one-off preview (note/chord) lands in
+        // `pending` and is only promoted to an active voice inside `tick`, so a
+        // guard that looked at `active_count()` alone silently swallowed every
+        // preview fired while the transport was stopped. The SoundFont check is
+        // `is_active`, not just queued events — released sample voices are still
+        // decaying after their note-off, and zeroing the buffer then would chop
+        // every preview's tail with an audible click.
+        let idle =
+            !self.playing.load(Ordering::Relaxed) && self.mixer.active_count() == 0 && !self.mixer.has_pending();
+        #[cfg(feature = "soundfont")]
+        let idle = idle && self.sf.as_ref().map_or(true, |sf| !sf.is_active());
+        if idle {
             out.fill(0.0);
             return;
         }
 
         let frames = out.len() / channels.max(1);
 
-        // The SoundFont renders in blocks, so pull that first and mix it in per frame.
+        // The SoundFont renders in blocks into a buffer it owns — no allocation
+        // here; this runs on the real-time thread.
         #[cfg(feature = "soundfont")]
-        let sf_block: Option<Vec<f32>> = self
-            .sf
-            .as_mut()
-            .map(|sf| sf.render(frames, self.mixer.time(), 1.0 / self.mixer.sample_rate()));
+        let sf_block: Option<&[f32]> = match self.sf.as_mut() {
+            Some(sf) => {
+                let t = self.mixer.time();
+                let dt = 1.0 / self.mixer.sample_rate();
+                Some(sf.render_mono(frames, t, dt))
+            }
+            None => None,
+        };
         #[cfg(not(feature = "soundfont"))]
-        let sf_block: Option<Vec<f32>> = None;
+        let sf_block: Option<&[f32]> = None;
 
         for (i, frame) in out.chunks_mut(channels.max(1)).enumerate() {
+            // `tick` applies the master volume to the synth voices; the SoundFont
+            // block is raw, so scale it here too — otherwise the volume slider
+            // would control only the drums whenever a soundfont is loaded.
             let mut s = self.mixer.tick();
             if let Some(block) = &sf_block {
                 if let Some(v) = block.get(i) {
-                    s = crate::soft_clip(s + *v);
+                    s = crate::soft_clip(s + *v * self.mixer.volume);
                 }
             }
             for o in frame.iter_mut() {
@@ -218,7 +273,7 @@ impl AudioCore {
             }
         }
 
-        let pos = (self.mixer.time() * self.mixer.sample_rate()) as u32;
+        let pos = (self.mixer.time_f64() * self.mixer.sample_rate() as f64) as u32;
         self.playhead.store(pos, Ordering::Relaxed);
         let _ = frames;
     }
@@ -316,6 +371,20 @@ mod tests {
             silent_buffers * 4 < total,
             "{silent_buffers} of {total} buffers were silent - that is a dropout, not a rest"
         );
+    }
+
+    #[test]
+    fn a_preview_note_sounds_while_the_transport_is_stopped() {
+        // Regression: the idle fast-path in `fill` must not swallow a one-off
+        // preview. Theory/Drills/Ear previews fire with `playing == false`; the
+        // note lives in `pending` until `tick` promotes it, so a guard that only
+        // checked active voices left every preview silent.
+        let (h, mut core) = AudioCore::new(44_100.0);
+        assert!(!h.is_playing());
+        h.note(Instrument::Vibes, 60, 0.7, 0.4, 0.0);
+        let mut buf = vec![0.0f32; 16_384];
+        core.fill(&mut buf, 2);
+        assert!(peak(&buf) > 0.01, "a preview fired while stopped produced silence");
     }
 
     #[test]
