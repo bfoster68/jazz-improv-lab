@@ -413,7 +413,7 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
 
     let slot = bars[current].chord_at(0);
     ui.label(egui::RichText::new(bars[current].symbol()).size(34.0).strong());
-    let use_sharp = use_sharp_for_root(slot.root);
+    let use_sharp = slot.use_sharp();
     let root_note = jazz_theory::note::Note::parse(pc_name(slot.root, use_sharp));
     let tones: Vec<String> = slot
         .quality

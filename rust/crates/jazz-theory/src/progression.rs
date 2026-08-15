@@ -19,22 +19,32 @@ pub struct Slot {
     pub root: i32,
     pub quality: Quality,
     pub scale: Option<&'static str>,
+    /// Spelling override. The default heuristic picks each pitch class's common
+    /// name (Bb, Eb, Gb...), but the same pitch is F# in one tune and Gb in
+    /// another — only the harmonic context knows, so a chart can say so.
+    pub sharp: Option<bool>,
 }
 
 impl Slot {
     pub fn new(root: i32, quality: Quality) -> Self {
-        Self { root: pc(root), quality, scale: None }
+        Self { root: pc(root), quality, scale: None, sharp: None }
     }
     pub fn with_scale(root: i32, quality: Quality, scale: &'static str) -> Self {
-        Self { root: pc(root), quality, scale: Some(scale) }
+        Self { root: pc(root), quality, scale: Some(scale), sharp: None }
+    }
+    /// Spell this chord's root with a sharp: the ii of E major is F#m7b5, and
+    /// printing Gbm7b5 there teaches the wrong note name.
+    pub fn spelled_sharp(mut self) -> Self {
+        self.sharp = Some(true);
+        self
+    }
+    /// The effective spelling for this root.
+    pub fn use_sharp(&self) -> bool {
+        self.sharp.unwrap_or_else(|| use_sharp_for_root(self.root))
     }
     /// Chord symbol, e.g. `Bbmaj7`, `Dm7b5`.
     pub fn symbol(&self) -> String {
-        format!(
-            "{}{}",
-            pc_name(self.root, use_sharp_for_root(self.root)),
-            self.quality.symbol()
-        )
+        format!("{}{}", pc_name(self.root, self.use_sharp()), self.quality.symbol())
     }
     /// The scale to display: the override if present, else the quality default.
     pub fn scale_name(&self) -> &'static str {
@@ -261,9 +271,11 @@ pub fn all_the_things() -> Vec<Bar> {
         // A2 — the same shape down a fourth, arriving in G
         one(0, Min7), one(5, Min7), one(10, Dom7), one(3, Maj7),
         one(8, Maj7), one(2, Dom7), one(7, Maj7), one(7, Maj7),
-        // B — G major, then the minor ii-V that lands on E major anyway
+        // B — G major, then the minor ii-V that lands on E major anyway. The ii
+        // of E is spelled F#m7b5, not Gbm7b5.
         one(9, Min7), one(2, Dom7), one(7, Maj7), one(7, Maj7),
-        one(6, Min7b5), one_s(11, Dom7, ALTERED), one(4, Maj7), one_s(0, Dom7, ALTERED),
+        Bar::one(Slot::new(6, Min7b5).spelled_sharp()),
+        one_s(11, Dom7, ALTERED), one(4, Maj7), one_s(0, Dom7, ALTERED),
         // A3 — home stretch, 12 bars with the tag
         one(5, Min7), one(10, Min7), one(3, Dom7), one(8, Maj7),
         one(1, Maj7), one(1, Min7), one(0, Min7), one_s(11, Dom7, LYDIAN_DOM),
@@ -454,6 +466,9 @@ mod tests {
         // Both C7s head for F minor, so both must be altered.
         assert_eq!(b[23].chord_at(0).scale_name(), ALTERED);
         assert_eq!(b[35].chord_at(3).scale_name(), ALTERED);
+        // The bridge's ii of E major reads F#m7b5 — Gbm7b5 is the same pitch
+        // spelled from the wrong side of the key.
+        assert_eq!(b[20].symbol(), "F#m7b5");
     }
 
     #[test]
