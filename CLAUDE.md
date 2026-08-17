@@ -74,7 +74,7 @@ tests-web/                Playwright suites for the browser app
 ```bash
 # Rust
 cd rust
-cargo test -p jazz-theory -p jazz-audio   # 155 tests, ~2s, no audio device needed
+cargo test -p jazz-theory -p jazz-audio   # 157 tests, ~2s, no audio device needed
 cargo test -p jazz-audio --features soundfont   # includes the SoundFont paths
 cargo check --workspace                  # includes the Bevy app
 cargo run -p jazz-audio --bin render-wav -- --list
@@ -126,7 +126,7 @@ cd docs && node build-docx.js
 
 ## Where things stand
 
-Last verified state: **155 tests pass** (95 theory + 60 audio), `cargo check
+Last verified state: **157 tests pass** (95 theory + 62 audio), `cargo check
 --workspace` is clean with no warnings, and `jazz-app` builds, links, and has
 been run and heard on real hardware.
 
@@ -160,6 +160,10 @@ the comp row, `--comp-style` in render-wav), in both meters: Rhythmic (the
 density-pool default — Feel only shapes this and Guide tones), Charleston,
 Four to the bar, Sustained, and Guide tones (`comp_shells`: just the 3rd and
 7th). A chosen figure is never overridden by the walking bass's two-feel bars.
+Voicings voice-lead: comp_voicing places the classic A/B rootless forms
+(bottom nearest middle C), so neighbouring chords step instead of
+transposing one shape; sampled velocities use a square-root curve
+(velocity_for) so the comping does not whisper under the bass.
 
 **The horn section is temporarily disabled** pending a rework: `HORNS_ENABLED
 = false` in main.rs hides its mixer row and keeps jam presets horn-free
