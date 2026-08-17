@@ -227,41 +227,80 @@ pub fn walking_bar(bar: &Bar, next_root: i32, rng: &mut Rng) -> [i32; 4] {
     [b1, b2, b3, b4]
 }
 
-/// A rootless voicing: 3rd, 5th and 7th, with an optional colour tone on top.
+/// A rootless voicing with real voice-leading, the way pianists actually comp.
 ///
-/// On an altered bar the natural 5 and 9 are replaced by the b13 and b9, so the
-/// piano never fights the tensions the app is telling the student to play.
+/// Two classic forms: A stacks 3-5-7-9 with the 3rd on the bottom, B stacks
+/// 7-9-3-5 with the 7th on the bottom. Each chord takes whichever form, in
+/// whichever octave, puts its bottom note nearest middle C. Neighbouring
+/// chords then share and step their voices instead of transposing one frozen
+/// shape — the textbook Dm7 - G7 - Cmaj7 hand movement falls straight out of
+/// the rule — and the register stays anchored without every chord living on
+/// the same shelf.
+///
+/// On an altered bar the natural 5 and 9 are replaced by the b13 and b9, so
+/// the piano never fights the tensions the app is telling the student to play.
 pub fn comp_voicing(slot: &Slot, rng: &mut Rng) -> Vec<i32> {
     let ints = slot.quality.ints();
-    let mut base = midi_for(slot.root, 4);
-    while base < 58 {
-        base += 12;
-    }
-    while base > 69 {
-        base -= 12;
-    }
     let altered = slot.scale == Some(ALTERED);
+    let third = ints[1];
     let fifth = if altered { 8 } else { ints[2] };
-    let mut v = vec![base + ints[1], base + fifth, base + ints[3]];
-    if slot.quality != Quality::Min7b5 && rng.chance(0.55) {
-        v.push(base + if altered { 13 } else { 14 });
+    let seventh = ints[3];
+    let ninth = if altered { 13 } else { 14 };
+    // Interval stacks above the root for the two forms. No 9th over a
+    // half-diminished chord, and on the minor family the B form carries its
+    // 9th on top — tucked between b7 and b3 it lands a half step under the
+    // third, the clash the voicing rules forbid.
+    let minor = matches!(slot.quality, Quality::Min7 | Quality::MinTonic);
+    let (form_a, form_b): (Vec<i32>, Vec<i32>) = if slot.quality == Quality::Min7b5 {
+        (vec![third, fifth, seventh], vec![seventh - 12, third, fifth])
+    } else if minor {
+        (
+            vec![third, fifth, seventh, ninth],
+            vec![seventh - 12, third, fifth, ninth],
+        )
+    } else {
+        (
+            vec![third, fifth, seventh, ninth],
+            vec![seventh - 12, ninth - 12, third, fifth],
+        )
+    };
+    let root4 = midi_for(slot.root, 4);
+    let mut best: (i32, Vec<i32>) = (i32::MAX, Vec::new());
+    for stack in [&form_a, &form_b] {
+        for oct in [-12, 0, 12] {
+            let r = root4 + oct;
+            let d = (r + stack[0] - 60).abs();
+            if d < best.0 {
+                best = (d, stack.iter().map(|i| r + i).collect());
+            }
+        }
+    }
+    let mut v = best.1;
+    // Breathe: sometimes thin the voicing to three notes.
+    if v.len() == 4 && rng.chance(0.35) {
+        v.pop();
     }
     v
 }
 
-/// Just the guide tones — the 3rd and the 7th — in the comping register. The
-/// thinnest voicing there is, and the two notes the curriculum keeps pointing
-/// the student's ear at.
+/// Just the guide tones — the 3rd and the 7th — placed by the same
+/// nearest-to-middle-C rule as [`comp_voicing`], so even the thinnest texture
+/// voice-leads: 3rd under 7th or 7th under 3rd, whichever connects.
 pub fn comp_shells(slot: &Slot) -> Vec<i32> {
     let ints = slot.quality.ints();
-    let mut base = midi_for(slot.root, 4);
-    while base < 58 {
-        base += 12;
+    let (third, seventh) = (ints[1], ints[3]);
+    let root4 = midi_for(slot.root, 4);
+    let mut best: (i32, Vec<i32>) = (i32::MAX, Vec::new());
+    for stack in [[third, seventh], [seventh - 12, third]] {
+        for oct in [-12, 0, 12] {
+            let r = root4 + oct;
+            let d = (r + stack[0] - 60).abs();
+            if d < best.0 {
+                best = (d, stack.iter().map(|i| r + i).collect());
+            }
+        }
     }
-    while base > 69 {
-        base -= 12;
-    }
-    vec![base + ints[1], base + ints[3]]
+    best.1
 }
 
 /// Everything that should sound during one bar.
@@ -1099,6 +1138,40 @@ mod tests {
             first.iter().any(|e| (e.offset / spb).fract() > 0.01),
             "a syncopated line with nothing off the beat"
         );
+    }
+
+    #[test]
+    fn comping_voice_leads_instead_of_transposing_one_shape() {
+        // The old voicing folded every root into one octave and stacked the
+        // same shape on it, so every chord sounded like the same chord moved.
+        // The A/B-form rule must connect neighbouring chords by step in the
+        // bottom voice while staying anchored near middle C.
+        let mut rng = Rng::new(1);
+        let d = comp_voicing(&Slot::new(2, Quality::Min7), &mut rng);
+        let g = comp_voicing(&Slot::new(7, Quality::Dom7), &mut rng);
+        let c = comp_voicing(&Slot::new(0, Quality::Maj7), &mut rng);
+        for v in [&d, &g, &c] {
+            assert!((54..=66).contains(&v[0]), "bottom {} left the anchor band", v[0]);
+        }
+        assert!((d[0] - g[0]).abs() <= 2, "Dm7->G7 bottom voice leapt: {} -> {}", d[0], g[0]);
+        assert!((g[0] - c[0]).abs() <= 2, "G7->Cmaj7 bottom voice leapt: {} -> {}", g[0], c[0]);
+        // Adjacent chords take different inversions — bottom intervals differ —
+        // so the colour changes chord to chord instead of repeating.
+        let d_bottom_interval = pc(d[0] - 2);
+        let g_bottom_interval = pc(g[0] - 7);
+        assert_ne!(
+            d_bottom_interval, g_bottom_interval,
+            "both chords bottomed on the same chord degree - still one shape"
+        );
+    }
+
+    #[test]
+    fn the_shells_voice_lead_too() {
+        let d = comp_shells(&Slot::new(2, Quality::Min7));
+        let g = comp_shells(&Slot::new(7, Quality::Dom7));
+        let c = comp_shells(&Slot::new(0, Quality::Maj7));
+        assert!((d[0] - g[0]).abs() <= 2, "guide tones leapt Dm7->G7");
+        assert!((g[0] - c[0]).abs() <= 2, "guide tones leapt G7->Cmaj7");
     }
 
     #[test]
