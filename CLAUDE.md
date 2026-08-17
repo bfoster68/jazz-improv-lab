@@ -74,7 +74,7 @@ tests-web/                Playwright suites for the browser app
 ```bash
 # Rust
 cd rust
-cargo test -p jazz-theory -p jazz-audio   # 147 tests, ~2s, no audio device needed
+cargo test -p jazz-theory -p jazz-audio   # 149 tests, ~2s, no audio device needed
 cargo test -p jazz-audio --features soundfont   # includes the SoundFont paths
 cargo check --workspace                  # includes the Bevy app
 cargo run -p jazz-audio --bin render-wav -- --list
@@ -123,7 +123,7 @@ cd docs && node build-docx.js
 
 ## Where things stand
 
-Last verified state: **147 tests pass** (93 theory + 54 audio), `cargo check
+Last verified state: **149 tests pass** (95 theory + 54 audio), `cargo check
 --workspace` is clean with no warnings, and `jazz-app` builds, links, and has
 been run and heard on real hardware.
 
@@ -151,6 +151,15 @@ than `clamp_bass` on purpose, so approach notes keep their contour), Pedal
 point (the form's opening root held under the changes) and Syncopated (a
 deliberately deterministic off-beat pattern anticipating the next chord — a
 groove that varies is not a groove). Tests pin each style's defining property.
+
+Masters and Standards are separate tabs. Each `Master` carries a biography —
+born/died (died empty for the living: Severinsen, Sandoval), a `bio`
+introduction and a chronological `life` timeline of (year, event) pairs mixing
+the personal and the musical; clicking a gallery card opens the page. Tests
+guard the data the way the composer credits are guarded: timelines must move
+forward through plausible years, bios must be substantive, and
+`the_living_are_not_declared_dead` means exactly what it says. Biographical
+facts were written from standard jazz history — check before "correcting".
 The waltz feel is a first pass the user expects to tune by ear; the knobs are
 in `plan_bar_three` — the beat-three lead-note chance (0.65), the ride accent
 gains, and the comping slot pools.

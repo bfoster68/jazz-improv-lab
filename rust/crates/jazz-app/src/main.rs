@@ -53,6 +53,8 @@ struct AppState {
     /// The last bar the chart auto-scrolled to, so it follows the music once
     /// per bar instead of pinning the view against the user's own scrolling.
     chart_bar: usize,
+    /// Which master's biography page is open, if any.
+    selected_master: Option<usize>,
     /// Audio-clock time (seconds) at which the current transport started. The
     /// mixer clock free-runs and is never reset, so bars must be scheduled
     /// relative to this epoch rather than to absolute zero — otherwise a restart
@@ -68,7 +70,8 @@ enum Tab {
     Theory,
     Drills,
     Ear,
-    Listening,
+    Masters,
+    Standards,
 }
 
 #[derive(Default)]
@@ -127,6 +130,7 @@ fn main() {
             scheduled_bars: 0,
             pending_tempo: None,
             chart_bar: 0,
+            selected_master: None,
             epoch: 0.0,
             sched_rng: Rng::new(0xC0FFEE),
         })
@@ -276,7 +280,8 @@ fn ui(mut contexts: EguiContexts, mut state: ResMut<AppState>, audio: Res<Audio>
             ui.selectable_value(&mut state.tab, Tab::Theory, "Theory");
             ui.selectable_value(&mut state.tab, Tab::Drills, "Drills");
             ui.selectable_value(&mut state.tab, Tab::Ear, "Ear Training");
-            ui.selectable_value(&mut state.tab, Tab::Listening, "Masters & Standards");
+            ui.selectable_value(&mut state.tab, Tab::Masters, "Masters");
+            ui.selectable_value(&mut state.tab, Tab::Standards, "Standards");
         });
     });
 
@@ -285,7 +290,8 @@ fn ui(mut contexts: EguiContexts, mut state: ResMut<AppState>, audio: Res<Audio>
         Tab::Theory => theory_ui(ui, &mut state, &audio),
         Tab::Drills => drills_ui(ui, &mut state, &audio),
         Tab::Ear => ear_ui(ui, &mut state, &audio),
-        Tab::Listening => listening_ui(ui, &mut state, &audio),
+        Tab::Masters => masters_ui(ui, &mut state),
+        Tab::Standards => standards_ui(ui, &mut state, &audio),
     });
 }
 
@@ -786,34 +792,95 @@ fn ear_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
 
 // ----------------------------------------------------------- masters & standards
 
-fn listening_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
+/// The Masters tab: a gallery of players, each opening onto a biography page —
+/// who they were, what happened to them, and what to listen for.
+fn masters_ui(ui: &mut egui::Ui, state: &mut AppState) {
+    let gold = egui::Color32::from_rgb(224, 166, 60);
+
+    // ---- the biography page ----
+    if let Some(i) = state.selected_master {
+        let m = &MASTERS[i];
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            if ui.button("\u{2190} All masters").clicked() {
+                state.selected_master = None;
+            }
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new(m.name).size(30.0).strong().color(gold));
+            let dates = if m.died.is_empty() {
+                format!("born {}", m.born)
+            } else {
+                format!("{} \u{2013} {}", m.born, m.died)
+            };
+            ui.label(
+                egui::RichText::new(format!("{} \u{00B7} {} \u{00B7} {}", m.instrument, m.era, dates))
+                    .weak(),
+            );
+            ui.add_space(10.0);
+            ui.add(egui::Label::new(egui::RichText::new(m.bio).size(15.0)).wrap());
+            ui.add_space(10.0);
+            ui.group(|ui| {
+                ui.label(egui::RichText::new("Listen for").strong().color(gold));
+                ui.add(egui::Label::new(m.listen_for).wrap());
+            });
+            ui.add_space(12.0);
+            ui.heading("A life in music");
+            ui.add_space(4.0);
+            for (year, event) in m.life {
+                ui.horizontal_top(|ui| {
+                    ui.add_sized(
+                        [52.0, 20.0],
+                        egui::Label::new(egui::RichText::new(*year).strong().color(gold)),
+                    );
+                    ui.add(egui::Label::new(*event).wrap());
+                });
+                ui.add_space(3.0);
+            }
+        });
+        return;
+    }
+
+    // ---- the gallery ----
     egui::ScrollArea::vertical().show(ui, |ui| {
         ui.heading("Masters to study");
         ui.label(
             egui::RichText::new(
                 "The language is learned by ear. Live with these players, sing along, then \
-                 transcribe a single phrase.",
+                 transcribe a single phrase. Click a name for the life behind the sound.",
             )
             .weak(),
         );
         ui.add_space(6.0);
-        for m in MASTERS {
-            ui.group(|ui| {
+        let mut open = None;
+        for (i, m) in MASTERS.iter().enumerate() {
+            let card = ui.group(|ui| {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(m.name)
-                            .strong()
-                            .color(egui::Color32::from_rgb(224, 166, 60)),
-                    );
+                    ui.label(egui::RichText::new(m.name).strong().color(gold));
                     ui.label(egui::RichText::new(format!("{} \u{00B7} {}", m.instrument, m.era)).weak());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(egui::RichText::new("their story \u{2192}").weak());
+                    });
                 });
                 ui.label(m.listen_for);
             });
+            let resp = card
+                .response
+                .interact(egui::Sense::click())
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            if resp.clicked() {
+                open = Some(i);
+            }
+        }
+        if let Some(i) = open {
+            state.selected_master = Some(i);
         }
         ui.add_space(4.0);
         ui.label(egui::RichText::new(format!("And more to explore: {ALSO_EXPLORE}")).italics().weak());
+    });
+}
 
-        ui.add_space(16.0);
+/// The Standards tab: the repertoire, each tune one click from a jam.
+fn standards_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
+    egui::ScrollArea::vertical().show(ui, |ui| {
         ui.heading("Essential standards");
         ui.label(
             egui::RichText::new(
