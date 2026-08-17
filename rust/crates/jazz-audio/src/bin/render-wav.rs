@@ -10,7 +10,27 @@
 
 use std::io::Write;
 
-use jazz_audio::engine::{plan_bar, Density, Rng, Settings};
+use jazz_audio::engine::{plan_bar, BassStyle, Density, Rng, Settings};
+
+/// Map a name on the command line to a bass style. "pedal" is enough for
+/// "Pedal point"; hyphens are optional.
+fn parse_bass_style(name: &str) -> BassStyle {
+    let wanted = name.to_ascii_lowercase();
+    let found = BassStyle::ALL.iter().copied().find(|s| {
+        let label = s.label().to_ascii_lowercase();
+        label == wanted
+            || label.replace('-', "") == wanted
+            || label.split(' ').next() == Some(wanted.as_str())
+    });
+    match found {
+        Some(s) => s,
+        None => {
+            let names: Vec<&str> = BassStyle::ALL.iter().map(|s| s.label()).collect();
+            eprintln!("Unknown bass style '{name}'. Choices: {}", names.join(", "));
+            std::process::exit(2);
+        }
+    }
+}
 use jazz_audio::voice::Instrument;
 use jazz_audio::Mixer;
 use jazz_theory::progression;
@@ -133,6 +153,7 @@ fn main() -> std::io::Result<()> {
             "--horn-inst" => settings.horn_inst = parse_instrument(&val(&mut i)),
             "--comp-inst" => settings.comp_inst = parse_instrument(&val(&mut i)),
             "--bass-inst" => settings.bass_inst = parse_instrument(&val(&mut i)),
+            "--bass-style" => settings.bass_style = parse_bass_style(&val(&mut i)),
             other if !other.starts_with('-') => id = other.to_string(),
             other => eprintln!("(ignoring unknown flag {other})"),
         }

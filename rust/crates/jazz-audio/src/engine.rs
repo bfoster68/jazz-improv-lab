@@ -46,6 +46,43 @@ pub enum Density {
     Busy,
 }
 
+/// How the bass builds its line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BassStyle {
+    /// Quarter notes through chord tones with approach notes — the backbone.
+    Walking,
+    /// Traditional two-beat: roots and fifths on one and three.
+    TwoBeat,
+    /// Chromatic passing tones and pushed eighths, after the bebop melodists.
+    Bebop,
+    /// One note — the form's opening root — held under the moving changes,
+    /// trading harmonic motion for tension and release.
+    Pedal,
+    /// A locked off-beat pattern that anticipates the next chord. Deliberately
+    /// deterministic: a groove that varies is not a groove.
+    Syncopated,
+}
+
+impl BassStyle {
+    pub const ALL: [BassStyle; 5] = [
+        BassStyle::Walking,
+        BassStyle::TwoBeat,
+        BassStyle::Bebop,
+        BassStyle::Pedal,
+        BassStyle::Syncopated,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            BassStyle::Walking => "Walking",
+            BassStyle::TwoBeat => "Two-beat",
+            BassStyle::Bebop => "Bebop",
+            BassStyle::Pedal => "Pedal point",
+            BassStyle::Syncopated => "Syncopated",
+        }
+    }
+}
+
 /// Eighth-note slots in a bar: 0 = beat 1, 1 = the "and", 2 = beat 2 …
 const SPARSE: &[&[usize]] = &[&[0], &[4], &[3], &[6], &[1], &[0, 4]];
 const MEDIUM: &[&[usize]] = &[
@@ -197,6 +234,7 @@ pub struct Settings {
     pub density: Density,
     pub bass: bool,
     pub bass_inst: Instrument,
+    pub bass_style: BassStyle,
     pub chords: bool,
     pub comp_inst: Instrument,
     /// A sustained horn-section pad over the changes.
@@ -214,6 +252,7 @@ impl Default for Settings {
             density: Density::Medium,
             bass: true,
             bass_inst: Instrument::Bass,
+            bass_style: BassStyle::Walking,
             chords: true,
             comp_inst: Instrument::Keys,
             horns: false,
@@ -264,41 +303,165 @@ fn plan_bar_four(
     let swing_off = if settings.swing { spb * 2.0 / 3.0 } else { spb * 0.5 };
     let last_of_form = index % bars.len() == bars.len() - 1;
 
-    plan.two_feel = !bar.is_split() && rng.chance(0.16);
+    // The occasional drop into two belongs to the walking style; a selected
+    // two-beat, pedal or groove line must never surprise the player.
+    plan.two_feel =
+        settings.bass_style == BassStyle::Walking && !bar.is_split() && rng.chance(0.16);
 
     // ---- bass ----
+    // The walk is always rolled, so switching the part on and off never
+    // re-rolls the rest of the bar's dice.
     let walk = walking_bar(&bar, next_root, rng);
     if settings.bass {
-        if plan.two_feel {
-            for beat in [0usize, 2] {
-                plan.notes.push(Event {
-                    offset: beat as f32 * spb,
-                    midi: walk[beat],
-                    gain: 0.175,
-                    dur: spb * 1.6,
-                    instrument: settings.bass_inst,
-                });
+        let first = bar.chord_at(0);
+        let second = bar.chord_at(2);
+        match settings.bass_style {
+            BassStyle::Walking => {
+                if plan.two_feel {
+                    for beat in [0usize, 2] {
+                        plan.notes.push(Event {
+                            offset: beat as f32 * spb,
+                            midi: walk[beat],
+                            gain: 0.175,
+                            dur: spb * 1.6,
+                            instrument: settings.bass_inst,
+                        });
+                    }
+                } else {
+                    for (beat, &m) in walk.iter().enumerate() {
+                        plan.notes.push(Event {
+                            offset: beat as f32 * spb,
+                            midi: m,
+                            gain: 0.165,
+                            dur: spb * 0.8,
+                            instrument: settings.bass_inst,
+                        });
+                    }
+                    if rng.chance(0.3) {
+                        let target = nearest_octave(next_root, walk[3]);
+                        let step = if target > walk[3] { 1 } else { -1 };
+                        plan.notes.push(Event {
+                            offset: 3.0 * spb + swing_off,
+                            midi: clamp_bass(walk[3] + step),
+                            gain: 0.13,
+                            dur: spb * 0.38,
+                            instrument: settings.bass_inst,
+                        });
+                    }
+                }
             }
-        } else {
-            for (beat, &m) in walk.iter().enumerate() {
-                plan.notes.push(Event {
-                    offset: beat as f32 * spb,
-                    midi: m,
-                    gain: 0.165,
-                    dur: spb * 0.8,
-                    instrument: settings.bass_inst,
-                });
+            BassStyle::TwoBeat => {
+                let one = clamp_bass(nearest_octave(first.root, 44));
+                // Beat three takes the second chord's root on a split bar,
+                // otherwise mostly the fifth, sometimes the root again.
+                let three = if bar.is_split() {
+                    clamp_bass(nearest_octave(second.root, one))
+                } else if rng.chance(0.65) {
+                    clamp_bass(nearest_octave(first.root + first.quality.ints()[2], one))
+                } else {
+                    one
+                };
+                for (offset, midi) in [(0.0, one), (2.0 * spb, three)] {
+                    plan.notes.push(Event {
+                        offset,
+                        midi,
+                        gain: 0.175,
+                        dur: spb * 1.8,
+                        instrument: settings.bass_inst,
+                    });
+                }
+                if rng.chance(0.22) {
+                    let target = nearest_octave(next_root, three);
+                    let step = if target > three { 1 } else { -1 };
+                    plan.notes.push(Event {
+                        offset: 3.0 * spb + swing_off,
+                        midi: clamp_bass(target - step),
+                        gain: 0.12,
+                        dur: spb * 0.35,
+                        instrument: settings.bass_inst,
+                    });
+                }
             }
-            if rng.chance(0.3) {
-                let target = nearest_octave(next_root, walk[3]);
-                let step = if target > walk[3] { 1 } else { -1 };
-                plan.notes.push(Event {
-                    offset: 3.0 * spb + swing_off,
-                    midi: clamp_bass(walk[3] + step),
-                    gain: 0.13,
-                    dur: spb * 0.38,
-                    instrument: settings.bass_inst,
-                });
+            BassStyle::Bebop => {
+                // Chromatic passing tones between chord-tone landings, and a
+                // pushed eighth now and then — the melodists' vocabulary.
+                let b1 = clamp_bass(nearest_octave(first.root, 46));
+                let (b2, b3);
+                if bar.is_split() {
+                    let land = clamp_bass(nearest_octave(second.root, b1));
+                    b2 = land + if land >= b1 { -1 } else { 1 };
+                    b3 = land;
+                } else {
+                    let land = clamp_bass(nearest_octave(first.root + first.quality.ints()[1], b1));
+                    b2 = land + if land >= b1 { -1 } else { 1 };
+                    b3 = land;
+                }
+                // The window is wider than clamp_bass on purpose: folding the
+                // target down an octave to satisfy a register cap turns a
+                // half-step approach into a sixth leap — contour first.
+                let mut target = nearest_octave(next_root, b3);
+                if target > 58 {
+                    target -= 12;
+                }
+                if target < 30 {
+                    target += 12;
+                }
+                let mut b4 = target + if target >= b3 { -1 } else { 1 };
+                if b4 == b3 {
+                    b4 = target + if target >= b3 { 1 } else { -1 };
+                }
+                for (beat, midi) in [b1, b2, b3, b4].into_iter().enumerate() {
+                    plan.notes.push(Event {
+                        offset: beat as f32 * spb,
+                        midi,
+                        gain: 0.165,
+                        dur: spb * 0.8,
+                        instrument: settings.bass_inst,
+                    });
+                }
+                if rng.chance(0.4) {
+                    // The push lands on the (already register-checked) target
+                    // itself; clamping it again could fold it an octave away
+                    // from the approach note it follows.
+                    plan.notes.push(Event {
+                        offset: 3.0 * spb + swing_off,
+                        midi: target,
+                        gain: 0.12,
+                        dur: spb * 0.35,
+                        instrument: settings.bass_inst,
+                    });
+                }
+            }
+            BassStyle::Pedal => {
+                // The form's opening root, held under everything.
+                let pedal = clamp_bass(nearest_octave(bars[0].chord_at(0).root, 44));
+                for (offset, gain) in [(0.0, 0.175), (2.0 * spb, 0.15)] {
+                    plan.notes.push(Event {
+                        offset,
+                        midi: pedal,
+                        gain,
+                        dur: spb * 1.9,
+                        instrument: settings.bass_inst,
+                    });
+                }
+            }
+            BassStyle::Syncopated => {
+                // Locked: root on one, fifth on the and of two, and the next
+                // chord anticipated on the and of four. No dice anywhere.
+                let root = clamp_bass(nearest_octave(first.root, 44));
+                let fifth = if bar.is_split() {
+                    clamp_bass(nearest_octave(second.root, root))
+                } else {
+                    clamp_bass(nearest_octave(first.root + first.quality.ints()[2], root))
+                };
+                let push = clamp_bass(nearest_octave(next_root, root));
+                for (offset, midi, gain, dur) in [
+                    (0.0, root, 0.175, spb * 1.4),
+                    (spb + swing_off, fifth, 0.155, spb * 1.1),
+                    (3.0 * spb + swing_off, push, 0.15, spb * 0.6),
+                ] {
+                    plan.notes.push(Event { offset, midi, gain, dur, instrument: settings.bass_inst });
+                }
             }
         }
     }
@@ -413,35 +576,64 @@ fn plan_bar_three(
     let last_of_form = index % bars.len() == bars.len() - 1;
     let slot = bar.chord_at(0);
 
-    // ---- bass: root on one, a lead note on three more often than not ----
+    // ---- bass ----
     if settings.bass {
         let root = clamp_bass(nearest_octave(slot.root, 44));
-        plan.notes.push(Event {
-            offset: 0.0,
-            midi: root,
-            gain: 0.175,
-            dur: spb * 1.9,
-            instrument: settings.bass_inst,
-        });
-        if rng.chance(0.65) {
-            let ints = slot.quality.ints();
-            // Either a chord tone, or a half-step approach into the next root.
-            let mut tone = if rng.chance(0.5) {
-                clamp_bass(nearest_octave(slot.root + ints[2], root))
-            } else {
-                let dir = if rng.chance(0.5) { 1 } else { -1 };
-                clamp_bass(nearest_octave(next_root + dir, root))
-            };
-            if tone == root {
-                tone = clamp_bass(nearest_octave(slot.root + ints[1], root));
+        let ints = slot.quality.ints();
+        let push = |plan: &mut BarPlan, offset: f32, midi: i32, gain: f32, dur: f32| {
+            plan.notes.push(Event { offset, midi, gain, dur, instrument: settings.bass_inst });
+        };
+        match settings.bass_style {
+            // Root on one, a lead note on three more often than not.
+            BassStyle::Walking => {
+                push(&mut plan, 0.0, root, 0.175, spb * 1.9);
+                if rng.chance(0.65) {
+                    let mut tone = if rng.chance(0.5) {
+                        clamp_bass(nearest_octave(slot.root + ints[2], root))
+                    } else {
+                        let dir = if rng.chance(0.5) { 1 } else { -1 };
+                        clamp_bass(nearest_octave(next_root + dir, root))
+                    };
+                    if tone == root {
+                        tone = clamp_bass(nearest_octave(slot.root + ints[1], root));
+                    }
+                    push(&mut plan, 2.0 * spb, tone, 0.15, spb * 0.8);
+                }
             }
-            plan.notes.push(Event {
-                offset: 2.0 * spb,
-                midi: tone,
-                gain: 0.15,
-                dur: spb * 0.8,
-                instrument: settings.bass_inst,
-            });
+            BassStyle::TwoBeat => {
+                let fifth = clamp_bass(nearest_octave(slot.root + ints[2], root));
+                push(&mut plan, 0.0, root, 0.175, spb * 1.8);
+                push(&mut plan, 2.0 * spb, fifth, 0.16, spb * 0.8);
+            }
+            BassStyle::Bebop => {
+                let land = clamp_bass(nearest_octave(slot.root + ints[1], root));
+                let passing = land + if land >= root { -1 } else { 1 };
+                // Wider than clamp_bass so the approach keeps its contour.
+                let mut target = nearest_octave(next_root, land);
+                if target > 58 {
+                    target -= 12;
+                }
+                if target < 30 {
+                    target += 12;
+                }
+                let approach = target + if target >= land { -1 } else { 1 };
+                push(&mut plan, 0.0, root, 0.17, spb * 0.85);
+                push(&mut plan, spb, passing, 0.155, spb * 0.85);
+                push(&mut plan, 2.0 * spb, approach, 0.16, spb * 0.85);
+            }
+            BassStyle::Pedal => {
+                let pedal = clamp_bass(nearest_octave(bars[0].chord_at(0).root, 44));
+                push(&mut plan, 0.0, pedal, 0.175, spb * 2.8);
+            }
+            BassStyle::Syncopated => {
+                // Locked, no dice: one, the and of two, the next chord pushed
+                // on the and of three.
+                let fifth = clamp_bass(nearest_octave(slot.root + ints[2], root));
+                let anticipation = clamp_bass(nearest_octave(next_root, root));
+                push(&mut plan, 0.0, root, 0.175, spb * 1.3);
+                push(&mut plan, spb + swing_off, fifth, 0.15, spb * 0.9);
+                push(&mut plan, 2.0 * spb + swing_off, anticipation, 0.15, spb * 0.5);
+            }
         }
     }
 
@@ -678,6 +870,117 @@ mod tests {
         assert!(
             !used.contains(&Instrument::Keys),
             "some bars fell back to the default comp instrument"
+        );
+    }
+
+    #[test]
+    fn every_bass_style_makes_a_line_in_both_meters() {
+        let bars = progression::two_five_one(0);
+        for meter in [Meter::Four, Meter::Three] {
+            for style in BassStyle::ALL {
+                let s = Settings {
+                    meter,
+                    bass_style: style,
+                    chords: false,
+                    drums: false,
+                    ..Settings::default()
+                };
+                let mut rng = Rng::new(9);
+                let bar_len = s.bar_len();
+                for i in 0..16 {
+                    let plan = plan_bar(&bars, i, &s, &mut rng);
+                    assert!(!plan.notes.is_empty(), "{style:?} in {meter:?} was silent");
+                    for e in &plan.notes {
+                        assert!(e.offset < bar_len, "{style:?} in {meter:?}: note past the barline");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_two_beat_line_sits_on_one_and_three() {
+        let bars = progression::blues(5);
+        let s = Settings {
+            bass_style: BassStyle::TwoBeat,
+            chords: false,
+            drums: false,
+            ..Settings::default()
+        };
+        let mut rng = Rng::new(4);
+        let spb = 60.0 / s.tempo;
+        for i in 0..48 {
+            let plan = plan_bar(&bars, i, &s, &mut rng);
+            assert_eq!(plan.notes[0].offset, 0.0);
+            assert!((plan.notes[1].offset - 2.0 * spb).abs() < 1e-4, "beat three is the second note");
+            // Beat one is always the root of the sounding chord.
+            let root = bars[i % bars.len()].chord_at(0).root;
+            assert_eq!(pc(plan.notes[0].midi), pc(root), "bar {i}: beat one must be the root");
+        }
+    }
+
+    #[test]
+    fn the_bebop_line_passes_chromatically_and_never_leaps_far() {
+        let bars = progression::two_five_one(0);
+        let s = Settings {
+            bass_style: BassStyle::Bebop,
+            chords: false,
+            drums: false,
+            ..Settings::default()
+        };
+        let mut rng = Rng::new(12);
+        for i in 0..32 {
+            let plan = plan_bar(&bars, i, &s, &mut rng);
+            let line: Vec<i32> = plan.notes.iter().map(|e| e.midi).collect();
+            assert!(
+                line.windows(2).any(|w| (w[0] - w[1]).abs() == 1),
+                "bar {i}: a bebop line without a chromatic step"
+            );
+            for w in line.windows(2) {
+                assert!((w[0] - w[1]).abs() <= 7, "bar {i}: the line leapt past a fifth");
+            }
+        }
+    }
+
+    #[test]
+    fn the_pedal_holds_one_note_under_the_changes() {
+        let bars = progression::blues(5);
+        let s = Settings {
+            bass_style: BassStyle::Pedal,
+            chords: false,
+            drums: false,
+            ..Settings::default()
+        };
+        let mut rng = Rng::new(3);
+        for i in 0..24 {
+            let plan = plan_bar(&bars, i, &s, &mut rng);
+            for e in &plan.notes {
+                assert_eq!(pc(e.midi), pc(5), "the pedal moved off the opening F");
+            }
+        }
+    }
+
+    #[test]
+    fn the_syncopated_line_locks_its_pattern() {
+        // On a one-chord vamp every bar must be byte-identical: a groove that
+        // varies is not a groove.
+        let bars = progression::modal_vamp(2);
+        let s = Settings {
+            bass_style: BassStyle::Syncopated,
+            chords: false,
+            drums: false,
+            ..Settings::default()
+        };
+        let mut rng = Rng::new(77);
+        let first = plan_bar(&bars, 0, &s, &mut rng).notes;
+        for i in 1..12 {
+            assert_eq!(plan_bar(&bars, i, &s, &mut rng).notes, first, "bar {i} broke the lock");
+        }
+        // And it must actually syncopate: at least one event off the beat.
+        let spb = 60.0 / s.tempo;
+        assert!(
+            first.iter().any(|e| (e.offset / spb).fract() > 0.01),
+            "a syncopated line with nothing off the beat"
         );
     }
 

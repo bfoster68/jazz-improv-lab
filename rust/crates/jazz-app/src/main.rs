@@ -10,7 +10,7 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
 
-use jazz_audio::engine::{plan_bar, Density, Rng, Settings};
+use jazz_audio::engine::{plan_bar, BassStyle, Density, Rng, Settings};
 use jazz_audio::stream::{AudioCore, AudioHandle};
 use jazz_theory::drill::{self, DRILL_IDS};
 use jazz_theory::harmony::{render_scale, find_scale, SCALES};
@@ -373,6 +373,14 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     ui.horizontal(|ui| {
         dirty |= ui.checkbox(&mut state.settings.bass, "Bass").changed();
         dirty |= instrument_combo(ui, "bass_inst", &mut state.settings.bass_inst, &Instrument::BASS_CHOICES);
+        ui.label("  Line");
+        egui::ComboBox::from_id_salt("bass_style")
+            .selected_text(state.settings.bass_style.label())
+            .show_ui(ui, |ui| {
+                for s in BassStyle::ALL {
+                    dirty |= ui.selectable_value(&mut state.settings.bass_style, s, s.label()).changed();
+                }
+            });
     });
     ui.horizontal(|ui| {
         dirty |= ui.checkbox(&mut state.settings.chords, "Comp").changed();

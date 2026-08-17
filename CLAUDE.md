@@ -74,7 +74,7 @@ tests-web/                Playwright suites for the browser app
 ```bash
 # Rust
 cd rust
-cargo test -p jazz-theory -p jazz-audio   # 142 tests, ~2s, no audio device needed
+cargo test -p jazz-theory -p jazz-audio   # 147 tests, ~2s, no audio device needed
 cargo test -p jazz-audio --features soundfont   # includes the SoundFont paths
 cargo check --workspace                  # includes the Bevy app
 cargo run -p jazz-audio --bin render-wav -- --list
@@ -123,7 +123,7 @@ cd docs && node build-docx.js
 
 ## Where things stand
 
-Last verified state: **142 tests pass** (93 theory + 49 audio), `cargo check
+Last verified state: **147 tests pass** (93 theory + 54 audio), `cargo check
 --workspace` is clean with no warnings, and `jazz-app` builds, links, and has
 been run and heard on real hardware.
 
@@ -142,6 +142,15 @@ beat one with a lead note on three, the waltz ride with the skip on the and of
 two, comping over six eighth slots — exercised by "ii-V-I jazz waltz" and
 "Jazz-waltz Blues in F". Split bars and the two-feel remain 4/4-only ideas.
 Adding 6/4 or 6/8 later means a new `Meter` variant plus its own arranger arm.
+
+The bass has five selectable lines (`BassStyle`, the "Line" dropdown on the
+bass row, `--bass-style` in render-wav), in both meters: Walking (keeps its
+random drop-into-two bars), Two-beat (roots and fifths on one and three),
+Bebop (chromatic passing tones, pushed eighths — its register window is wider
+than `clamp_bass` on purpose, so approach notes keep their contour), Pedal
+point (the form's opening root held under the changes) and Syncopated (a
+deliberately deterministic off-beat pattern anticipating the next chord — a
+groove that varies is not a groove). Tests pin each style's defining property.
 The waltz feel is a first pass the user expects to tune by ear; the knobs are
 in `plan_bar_three` — the beat-three lead-note chance (0.65), the ride accent
 gains, and the comping slot pools.
