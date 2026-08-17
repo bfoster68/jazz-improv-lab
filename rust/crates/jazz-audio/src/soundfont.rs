@@ -73,6 +73,17 @@ struct PendingOff {
     key: i32,
 }
 
+/// Map an engine gain to a MIDI velocity.
+///
+/// The synthesis voices scale linearly with gain, but a sampled instrument's
+/// velocity maps to loudness roughly quadratically — so the old linear
+/// `gain * 420` sent the comping (gain ~0.05) out at velocity ~20, a whisper
+/// under a bass at ~70. The square root undoes that curve: the comping lands
+/// near velocity 60 and the band balances the way the synth mix does.
+fn velocity_for(gain: f32) -> i32 {
+    (((gain / 0.18).max(0.0).sqrt() * 105.0) as i32).clamp(24, 127)
+}
+
 /// How long after the last note-off the synth is assumed to still be releasing.
 /// rustysynth exposes no active-voice count, so the render window is padded by
 /// this much rather than cutting the decay dead.
@@ -130,10 +141,13 @@ impl SoundfontVoices {
     /// Queue a note at absolute time `at`, lasting `dur` seconds.
     pub fn note(&mut self, instrument: Instrument, midi: i32, gain: f32, dur: f32, at: f32) {
         let channel = channel_of(instrument);
-        // The synth voices are trimmed well below unity, so scale up to a sensible
-        // MIDI velocity rather than mapping gain straight onto 0-127.
-        let velocity = ((gain * 420.0) as i32).clamp(20, 127);
-        self.notes.push(PendingNote { at, channel, key: midi, velocity, dur: dur.max(0.05) });
+        self.notes.push(PendingNote {
+            at,
+            channel,
+            key: midi,
+            velocity: velocity_for(gain),
+            dur: dur.max(0.05),
+        });
     }
 
     /// Stop everything at once.
@@ -224,6 +238,20 @@ mod tests {
         assert_eq!(program_of(Instrument::Sax), 66); // Tenor Sax
         assert_eq!(program_of(Instrument::Trombone), 57); // Trombone
         assert_eq!(program_of(Instrument::Trumpet), 56); // Trumpet
+    }
+
+    #[test]
+    fn velocities_keep_the_band_in_balance() {
+        // The comping (gain ~0.05) must not whisper under the bass (~0.17):
+        // sampled loudness is roughly quadratic in velocity, so the mapping
+        // has to lift the quiet parts.
+        let comp = velocity_for(0.055);
+        let bass = velocity_for(0.17);
+        assert!(comp >= 55, "comping still whispers at velocity {comp}");
+        assert!((95..=127).contains(&bass), "bass velocity {bass} out of range");
+        assert!(velocity_for(0.01) >= 24, "floor must keep ghost notes audible");
+        assert!(velocity_for(0.5) <= 127);
+        assert!(velocity_for(0.1) > velocity_for(0.05), "mapping must stay monotonic");
     }
 
     #[test]

@@ -93,9 +93,10 @@ impl Instrument {
         }
     }
 
-    /// Instruments that suit comping (chordal) parts.
+    /// Instruments that suit comping (chordal) parts; acoustic piano first,
+    /// as the default.
     pub const COMP_CHOICES: [Instrument; 4] =
-        [Instrument::Keys, Instrument::Piano, Instrument::Guitar, Instrument::Vibes];
+        [Instrument::Piano, Instrument::Keys, Instrument::Guitar, Instrument::Vibes];
 
     /// Instruments that suit a bass part.
     pub const BASS_CHOICES: [Instrument; 2] = [Instrument::Bass, Instrument::Trombone];

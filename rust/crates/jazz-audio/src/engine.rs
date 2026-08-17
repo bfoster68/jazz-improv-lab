@@ -308,7 +308,7 @@ impl Default for Settings {
             bass_inst: Instrument::Bass,
             bass_style: BassStyle::Walking,
             chords: true,
-            comp_inst: Instrument::Keys,
+            comp_inst: Instrument::Piano,
             comp_style: CompStyle::Rhythmic,
             horns: false,
             horn_inst: Instrument::Sax,
@@ -945,7 +945,7 @@ mod tests {
             let mut offs: Vec<String> = plan
                 .notes
                 .iter()
-                .filter(|e| e.instrument == Instrument::Keys)
+                .filter(|e| e.instrument == s.comp_inst)
                 .map(|e| format!("{:.3}", e.offset))
                 .collect();
             offs.sort();

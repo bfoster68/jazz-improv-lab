@@ -55,6 +55,9 @@ struct AppState {
     chart_bar: usize,
     /// Which master's biography page is open, if any.
     selected_master: Option<usize>,
+    /// What is actually making the sound, shown in the transport so nobody has
+    /// to guess whether the samples loaded: "FluidR3 GM" or "built-in synth".
+    audio_engine: Option<String>,
     /// Audio-clock time (seconds) at which the current transport started. The
     /// mixer clock free-runs and is never reset, so bars must be scheduled
     /// relative to this epoch rather than to absolute zero — otherwise a restart
@@ -136,6 +139,7 @@ fn main() {
             pending_tempo: None,
             chart_bar: 0,
             selected_master: None,
+            audio_engine: None,
             epoch: 0.0,
             sched_rng: Rng::new(0xC0FFEE),
         })
@@ -186,6 +190,7 @@ struct AudioStream {
 /// one code path for both.
 fn start_audio_on_first_interaction(
     mut stream: NonSendMut<AudioStream>,
+    mut state: ResMut<AppState>,
     audio: Res<Audio>,
     buttons: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -203,7 +208,10 @@ fn start_audio_on_first_interaction(
             // sample rate is known — loading it at the wrong rate plays every
             // sample transposed.
             match start_audio(core) {
-                Ok(s) => stream.stream = Some(s),
+                Ok((s, engine)) => {
+                    stream.stream = Some(s);
+                    state.audio_engine = Some(engine);
+                }
                 Err((core, why)) => {
                     eprintln!("audio unavailable: {why}");
                     stream.core = Some(core); // keep it, so a later click can retry
@@ -346,6 +354,12 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
                 load_progression(state, audio, state.prog_index, true);
             }
         }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // Which engine is sounding — so nobody has to guess whether the
+            // GM samples actually loaded.
+            let engine = state.audio_engine.as_deref().unwrap_or("audio starts on first click");
+            ui.label(egui::RichText::new(engine).weak().size(12.0));
+        });
     });
 
     ui.add_space(6.0);
@@ -968,7 +982,7 @@ fn start_jam(state: &mut AppState, audio: &Audio, st: &Standard, full_band: bool
 ///
 /// On failure the core is returned so a later gesture can try again — losing the
 /// device should never cost you the queued music.
-fn start_audio(mut core: AudioCore) -> Result<cpal::Stream, (AudioCore, String)> {
+fn start_audio(mut core: AudioCore) -> Result<(cpal::Stream, String), (AudioCore, String)> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
     let host = cpal::default_host();
@@ -992,16 +1006,23 @@ fn start_audio(mut core: AudioCore) -> Result<cpal::Stream, (AudioCore, String)>
 
     // Load the SoundFont at the real device rate so its samples are not
     // transposed. Pitched instruments then play from FluidR3; drums stay synth.
-    match find_soundfont() {
+    let engine = match find_soundfont() {
         Some(path) => match jazz_audio::soundfont::SoundfontVoices::load(&path, rate) {
             Ok(sf) => {
                 println!("[audio] using soundfont {}", path.display());
                 core.set_soundfont(Some(sf));
+                "FluidR3 GM".to_string()
             }
-            Err(why) => println!("[audio] built-in synth ({why})"),
+            Err(why) => {
+                println!("[audio] built-in synth ({why})");
+                "built-in synth".to_string()
+            }
         },
-        None => println!("[audio] built-in synth (no soundfont found)"),
-    }
+        None => {
+            println!("[audio] built-in synth (no soundfont found)");
+            "built-in synth".to_string()
+        }
+    };
 
     let mut core = core;
     let built = device.build_output_stream(
@@ -1014,7 +1035,7 @@ fn start_audio(mut core: AudioCore) -> Result<cpal::Stream, (AudioCore, String)>
     );
     match built {
         Ok(stream) => match stream.play() {
-            Ok(()) => Ok(stream),
+            Ok(()) => Ok((stream, engine)),
             Err(e) => Err((AudioCore::new(44_100.0).1, format!("could not start stream: {e}"))),
         },
         Err(e) => Err((AudioCore::new(44_100.0).1, format!("could not open stream: {e}"))),
