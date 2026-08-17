@@ -357,7 +357,7 @@ mod tests {
         let mut rng = Rng::new(5);
         let s = Settings::default();
         let mut m = Mixer::new(22_050.0);
-        let bar_len = 4.0 * 60.0 / s.tempo;
+        let bar_len = s.bar_len();
         for i in 0..24 {
             let plan = plan_bar(&bars, i, &s, &mut rng);
             m.schedule(&plan, i as f32 * bar_len);

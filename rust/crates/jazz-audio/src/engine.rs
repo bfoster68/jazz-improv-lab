@@ -6,7 +6,7 @@
 
 use jazz_theory::harmony::Quality;
 use jazz_theory::note::{midi_for, pc};
-use jazz_theory::progression::{Bar, Slot, ALTERED};
+use jazz_theory::progression::{Bar, Meter, Slot, ALTERED};
 
 pub use crate::voice::Instrument;
 
@@ -190,6 +190,9 @@ pub struct BarPlan {
 #[derive(Debug, Clone, Copy)]
 pub struct Settings {
     pub tempo: f32,
+    /// Beats per bar — set from the loaded progression, since meter belongs to
+    /// the tune the way its key does.
+    pub meter: Meter,
     pub swing: bool,
     pub density: Density,
     pub bass: bool,
@@ -206,6 +209,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             tempo: 120.0,
+            meter: Meter::Four,
             swing: true,
             density: Density::Medium,
             bass: true,
@@ -219,8 +223,31 @@ impl Default for Settings {
     }
 }
 
-/// Build one bar's worth of events.
+impl Settings {
+    /// One bar's length in seconds — the only place beats-per-bar meets tempo,
+    /// so 4/4 and 3/4 can never disagree across the scheduler, the chart
+    /// highlight and the offline renderer.
+    pub fn bar_len(&self) -> f32 {
+        self.meter.beats() as f32 * 60.0 / self.tempo.max(20.0)
+    }
+}
+
+/// Build one bar's worth of events for the active meter.
 pub fn plan_bar(
+    bars: &[Bar],
+    index: usize,
+    settings: &Settings,
+    rng: &mut Rng,
+) -> BarPlan {
+    match settings.meter {
+        Meter::Four => plan_bar_four(bars, index, settings, rng),
+        Meter::Three => plan_bar_three(bars, index, settings, rng),
+    }
+}
+
+/// The 4/4 rhythm section: walking bass, comping hits over eight eighth-note
+/// slots, ride on all four beats.
+fn plan_bar_four(
     bars: &[Bar],
     index: usize,
     settings: &Settings,
@@ -364,6 +391,127 @@ pub fn plan_bar(
     plan
 }
 
+/// The jazz waltz: not a truncated walk. The bass roots beat one and leads on
+/// beat three; the ride marks all three beats with the skip on the and of two;
+/// comping floats on beat two and its offbeats. A waltz bar holds one chord —
+/// split bars are a 4/4 idea and `bar.second` is ignored here.
+fn plan_bar_three(
+    bars: &[Bar],
+    index: usize,
+    settings: &Settings,
+    rng: &mut Rng,
+) -> BarPlan {
+    let mut plan = BarPlan::default();
+    if bars.is_empty() {
+        return plan;
+    }
+    let bar = bars[index % bars.len()];
+    let next = bars[(index + 1) % bars.len()];
+    let next_root = next.chord_at(0).root;
+    let spb = 60.0 / settings.tempo.max(20.0);
+    let swing_off = if settings.swing { spb * 2.0 / 3.0 } else { spb * 0.5 };
+    let last_of_form = index % bars.len() == bars.len() - 1;
+    let slot = bar.chord_at(0);
+
+    // ---- bass: root on one, a lead note on three more often than not ----
+    if settings.bass {
+        let root = clamp_bass(nearest_octave(slot.root, 44));
+        plan.notes.push(Event {
+            offset: 0.0,
+            midi: root,
+            gain: 0.175,
+            dur: spb * 1.9,
+            instrument: settings.bass_inst,
+        });
+        if rng.chance(0.65) {
+            let ints = slot.quality.ints();
+            // Either a chord tone, or a half-step approach into the next root.
+            let mut tone = if rng.chance(0.5) {
+                clamp_bass(nearest_octave(slot.root + ints[2], root))
+            } else {
+                let dir = if rng.chance(0.5) { 1 } else { -1 };
+                clamp_bass(nearest_octave(next_root + dir, root))
+            };
+            if tone == root {
+                tone = clamp_bass(nearest_octave(slot.root + ints[1], root));
+            }
+            plan.notes.push(Event {
+                offset: 2.0 * spb,
+                midi: tone,
+                gain: 0.15,
+                dur: spb * 0.8,
+                instrument: settings.bass_inst,
+            });
+        }
+    }
+
+    // ---- comping: six eighth-note slots; beat two carries the waltz ----
+    if settings.chords {
+        let v = comp_voicing(&slot, rng);
+        let vnext = comp_voicing(&next.chord_at(0), rng);
+        let pool: &[&[usize]] = match settings.density {
+            Density::Sparse => &[&[2], &[3], &[0]],
+            Density::Medium => &[&[2], &[3], &[2, 5], &[0, 3]],
+            Density::Busy => &[&[1, 3], &[2, 5], &[0, 3, 5], &[3, 4]],
+        };
+        let hits = pool[rng.below(pool.len())];
+        for &s in hits {
+            let beat = s / 2;
+            let on_and = s % 2 == 1;
+            let offset = beat as f32 * spb + if on_and { swing_off } else { 0.0 };
+            // the and of three anticipates the next chord
+            let voicing = if s == 5 { &vnext } else { &v };
+            let (gain, dur) = if on_and { (0.053, spb * 0.6) } else { (0.060, spb * 0.8) };
+            for &m in voicing {
+                plan.notes.push(Event { offset, midi: m, gain, dur, instrument: settings.comp_inst });
+            }
+        }
+    }
+
+    // ---- horns: a dotted-half pad ----
+    if settings.horns {
+        let octave = settings.horn_inst.section_octave();
+        let mut horn_rng = Rng::new(0x57_414C_545A ^ (index as u64).wrapping_mul(0x9E37_79B9));
+        for &m in &comp_voicing(&slot, &mut horn_rng) {
+            plan.notes.push(Event {
+                offset: 0.0,
+                midi: m + octave,
+                gain: 0.06,
+                dur: 3.0 * spb,
+                instrument: settings.horn_inst,
+            });
+        }
+    }
+
+    // ---- drums: the waltz ride, hats on two ----
+    if settings.drums {
+        for beat in 0..3 {
+            let t = beat as f32 * spb;
+            plan.perc.push(PercEvent {
+                offset: t,
+                kind: PercRole::Ride,
+                gain: if beat == 0 { 0.060 } else { 0.046 } + rng.next_f32() * 0.010,
+            });
+        }
+        // the skip on the and of two is what gives the waltz its lilt
+        plan.perc.push(PercEvent { offset: spb + swing_off, kind: PercRole::RideSkip, gain: 0.033 });
+        plan.perc.push(PercEvent { offset: spb, kind: PercRole::HiHat, gain: 0.055 });
+        if rng.chance(0.20) {
+            plan.perc.push(PercEvent { offset: 0.0, kind: PercRole::Kick, gain: 0.16 });
+        }
+        if rng.chance(0.15) {
+            plan.perc.push(PercEvent { offset: 2.0 * spb + swing_off, kind: PercRole::Brush, gain: 0.08 });
+        }
+        if last_of_form {
+            for (i, g) in [(0.0, 0.085), (0.5, 0.090)] {
+                plan.perc.push(PercEvent { offset: 2.0 * spb + i * spb, kind: PercRole::Brush, gain: g });
+            }
+        }
+    }
+
+    plan
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -464,7 +612,7 @@ mod tests {
         let bars = progression::blue_bossa();
         let mut rng = Rng::new(11);
         let s = settings();
-        let bar_len = 4.0 * 60.0 / s.tempo;
+        let bar_len = s.bar_len();
         for i in 0..bars.len() {
             let plan = plan_bar(&bars, i, &s, &mut rng);
             for e in &plan.notes {
@@ -531,6 +679,55 @@ mod tests {
             !used.contains(&Instrument::Keys),
             "some bars fell back to the default comp instrument"
         );
+    }
+
+    #[test]
+    fn a_waltz_bar_lays_out_in_three() {
+        let bars = progression::two_five_one(0);
+        let s = Settings { meter: Meter::Three, ..Settings::default() };
+        let mut rng = Rng::new(5);
+        let bar_len = s.bar_len();
+        for i in 0..48 {
+            let plan = plan_bar(&bars, i, &s, &mut rng);
+            for e in &plan.notes {
+                assert!(e.offset < bar_len, "a note at {}s is past the 3/4 barline", e.offset);
+            }
+            for p in &plan.perc {
+                assert!(p.offset < bar_len + 0.001, "percussion at {}s is past the barline", p.offset);
+            }
+            let rides = plan.perc.iter().filter(|p| p.kind == PercRole::Ride).count();
+            assert_eq!(rides, 3, "the waltz ride marks all three beats");
+            assert!(!plan.two_feel, "the two-feel is a 4/4 idea");
+        }
+    }
+
+    #[test]
+    fn the_waltz_bass_roots_beat_one_and_never_repeats_itself() {
+        let bars = progression::blues(5);
+        let s = Settings {
+            meter: Meter::Three,
+            chords: false,
+            drums: false,
+            ..Settings::default()
+        };
+        let mut rng = Rng::new(21);
+        let spb = 60.0 / s.tempo;
+        for i in 0..96 {
+            let plan = plan_bar(&bars, i, &s, &mut rng);
+            let first = &plan.notes[0];
+            assert_eq!(first.offset, 0.0, "the waltz bass must root beat one");
+            if let Some(second) = plan.notes.get(1) {
+                assert!((second.offset - 2.0 * spb).abs() < 1e-4, "the lead note lives on beat three");
+                assert_ne!(second.midi, first.midi, "bar {i}: the bass repeated its note");
+            }
+        }
+    }
+
+    #[test]
+    fn a_waltz_bar_is_three_quarters_the_length_of_common_time() {
+        let four = Settings::default();
+        let three = Settings { meter: Meter::Three, ..Settings::default() };
+        assert!((three.bar_len() / four.bar_len() - 0.75).abs() < 1e-6);
     }
 
     #[test]

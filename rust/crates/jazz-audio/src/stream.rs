@@ -352,7 +352,7 @@ mod tests {
         let bars = progression::blues(5);
         let s = Settings::default();
         let mut rng = Rng::new(9);
-        let bar_len = 4.0 * 60.0 / s.tempo;
+        let bar_len = s.bar_len();
         for i in 0..12 {
             h.schedule(plan_bar(&bars, i, &s, &mut rng), i as f32 * bar_len);
         }

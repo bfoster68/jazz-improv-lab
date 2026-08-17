@@ -232,7 +232,7 @@ fn keep_audio_fed(audio: Res<Audio>, mut state: ResMut<AppState>) {
     // Borrow fields directly rather than cloning the form every frame; this
     // runs 60x a second and usually schedules nothing.
     let state = &mut *state;
-    let bar_len = 4.0 * 60.0 / state.settings.tempo;
+    let bar_len = state.settings.bar_len();
     let now = audio.0.time();
     let epoch = state.epoch;
     let settings = state.settings;
@@ -403,7 +403,7 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     if bars.is_empty() {
         return;
     }
-    let bar_len = 4.0 * 60.0 / state.settings.tempo;
+    let bar_len = state.settings.bar_len();
     let current = if playing {
         let elapsed = (audio.0.time() - state.epoch).max(0.0);
         ((elapsed / bar_len) as usize) % bars.len()
@@ -435,6 +435,14 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     // ---- the chart: four-bar systems that read like a lead sheet ----
     let sections = state.progs[state.prog_index].sections;
     let gold = egui::Color32::from_rgb(224, 166, 60);
+    ui.label(
+        egui::RichText::new(format!(
+            "{} \u{00B7} {} bars",
+            state.settings.meter.label(),
+            bars.len()
+        ))
+        .weak(),
+    );
     egui::ScrollArea::vertical().show(ui, |ui| {
         for (sys, chunk) in bars.chunks(4).enumerate() {
             let start = sys * 4;
@@ -490,8 +498,10 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
 }
 
 /// Load a progression's changes and (re)start the transport from its top.
+/// The tune's meter comes with its bars — a waltz arrives in three.
 fn load_progression(state: &mut AppState, audio: &Audio, index: usize, play: bool) {
     state.bars = state.progs[index].bars.clone();
+    state.settings.meter = state.progs[index].meter;
     restart_transport(state, audio, play);
 }
 
@@ -510,7 +520,7 @@ fn resync(state: &mut AppState, audio: &Audio) {
     if !audio.0.is_playing() {
         return;
     }
-    let bar_len = 4.0 * 60.0 / state.settings.tempo;
+    let bar_len = state.settings.bar_len();
     let elapsed = (audio.0.time() - state.epoch).max(0.0);
     let next_bar = (elapsed / bar_len) as usize + 1;
     // Drop only what is queued from the next bar boundary on — the remainder of

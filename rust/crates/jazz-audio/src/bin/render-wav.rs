@@ -151,7 +151,9 @@ fn main() -> std::io::Result<()> {
     }
 
     const SR: f32 = 44_100.0;
-    let bar_len = 4.0 * 60.0 / settings.tempo;
+    // A tune's meter travels with its bars, exactly as the app loads it.
+    settings.meter = prog.meter;
+    let bar_len = settings.bar_len();
     let total_bars = prog.bars.len() * choruses;
     let tail = total_bars as f32 * bar_len + 2.0;
 

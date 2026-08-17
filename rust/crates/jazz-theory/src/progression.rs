@@ -84,6 +84,32 @@ impl Bar {
     }
 }
 
+/// How many beats a bar carries. A property of the tune, like its key — not a
+/// user setting: Someday My Prince Will Come simply *is* in three.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Meter {
+    /// Common time — four quarter-note beats.
+    Four,
+    /// Jazz waltz — three quarter-note beats.
+    Three,
+}
+
+impl Meter {
+    pub fn beats(self) -> usize {
+        match self {
+            Meter::Four => 4,
+            Meter::Three => 3,
+        }
+    }
+    /// The signature the way a chart prints it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Meter::Four => "4/4",
+            Meter::Three => "3/4",
+        }
+    }
+}
+
 /// A named, playable progression.
 #[derive(Debug, Clone)]
 pub struct Progression {
@@ -91,6 +117,7 @@ pub struct Progression {
     pub name: &'static str,
     pub level: Level,
     pub bars: Vec<Bar>,
+    pub meter: Meter,
     /// Where the form's sections begin, for the chart display: (bar index,
     /// label). Empty when the form has no letter sections worth marking.
     pub sections: &'static [(usize, &'static str)],
@@ -396,29 +423,32 @@ pub fn cantaloupe_island() -> Vec<Bar> {
 /// Everything the play-along engine can load.
 pub fn all() -> Vec<Progression> {
     use Level::*;
+    use Meter::*;
     const NONE: &[(usize, &'static str)] = &[];
     vec![
-        Progression { id: "251",        name: "ii-V-I in C major",            level: Beginner,     bars: two_five_one(0),        sections: NONE },
-        Progression { id: "251min",     name: "ii-V-i in C minor",            level: Beginner,     bars: two_five_one_minor(0),  sections: NONE },
-        Progression { id: "blues",      name: "12-bar Blues in F",            level: Beginner,     bars: blues(5),               sections: NONE },
-        Progression { id: "modal",      name: "Modal vamp - D Dorian",        level: Beginner,     bars: modal_vamp(2),          sections: NONE },
-        Progression { id: "autumn",     name: "Autumn Leaves (A)",            level: Intermediate, bars: autumn_leaves(10),      sections: NONE },
-        Progression { id: "ttsub",      name: "Tritone-sub turnaround",       level: Intermediate, bars: tritone_sub(0),         sections: NONE },
-        Progression { id: "cycle",      name: "ii-V-I through keys",          level: Intermediate, bars: cycle(0),               sections: NONE },
-        Progression { id: "minorblues", name: "Minor blues in C",             level: Advanced,     bars: minor_blues(0),         sections: NONE },
-        Progression { id: "coltrane",   name: "Coltrane cycle",               level: Advanced,     bars: coltrane_cycle(0),      sections: NONE },
-        Progression { id: "sowhat",     name: "So What - full AABA",          level: Standard,     bars: so_what(),              sections: AABA_32 },
-        Progression { id: "bluebossa",  name: "Blue Bossa",                   level: Standard,     bars: blue_bossa(),           sections: NONE },
-        Progression { id: "atrain",     name: "Take the A Train (A)",         level: Standard,     bars: a_train(),              sections: NONE },
-        Progression { id: "rhythma",    name: "Rhythm Changes (A) - Bb",      level: Standard,     bars: rhythm_a(),             sections: NONE },
-        Progression { id: "rhythmfull", name: "Rhythm Changes - full AABA",   level: Standard,     bars: rhythm_full(),          sections: AABA_32 },
-        Progression { id: "attya",      name: "All the Things You Are",       level: Standard,     bars: all_the_things(),       sections: &[(0, "A"), (8, "A"), (16, "B"), (24, "A")] },
-        Progression { id: "allofme",    name: "All of Me",                    level: Standard,     bars: all_of_me(),            sections: &[(0, "A"), (8, "B"), (16, "A"), (24, "C")] },
-        Progression { id: "flymoon",    name: "Fly Me to the Moon",           level: Standard,     bars: fly_me_to_the_moon(),   sections: &[(0, "A"), (16, "B")] },
-        Progression { id: "misty",      name: "Misty",                        level: Standard,     bars: misty(),                sections: AABA_32 },
-        Progression { id: "tuneup",     name: "Tune Up",                      level: Standard,     bars: tune_up(),              sections: NONE },
-        Progression { id: "solar",      name: "Solar",                        level: Standard,     bars: solar(),                sections: NONE },
-        Progression { id: "cantaloupe", name: "Cantaloupe Island",            level: Standard,     bars: cantaloupe_island(),    sections: NONE },
+        Progression { id: "251",        name: "ii-V-I in C major",            level: Beginner,     bars: two_five_one(0),        meter: Four,  sections: NONE },
+        Progression { id: "251min",     name: "ii-V-i in C minor",            level: Beginner,     bars: two_five_one_minor(0),  meter: Four,  sections: NONE },
+        Progression { id: "blues",      name: "12-bar Blues in F",            level: Beginner,     bars: blues(5),               meter: Four,  sections: NONE },
+        Progression { id: "modal",      name: "Modal vamp - D Dorian",        level: Beginner,     bars: modal_vamp(2),          meter: Four,  sections: NONE },
+        Progression { id: "waltz251",   name: "ii-V-I jazz waltz",            level: Beginner,     bars: two_five_one(0),        meter: Three, sections: NONE },
+        Progression { id: "autumn",     name: "Autumn Leaves (A)",            level: Intermediate, bars: autumn_leaves(10),      meter: Four,  sections: NONE },
+        Progression { id: "ttsub",      name: "Tritone-sub turnaround",       level: Intermediate, bars: tritone_sub(0),         meter: Four,  sections: NONE },
+        Progression { id: "cycle",      name: "ii-V-I through keys",          level: Intermediate, bars: cycle(0),               meter: Four,  sections: NONE },
+        Progression { id: "waltzblues", name: "Jazz-waltz Blues in F",        level: Intermediate, bars: blues(5),               meter: Three, sections: NONE },
+        Progression { id: "minorblues", name: "Minor blues in C",             level: Advanced,     bars: minor_blues(0),         meter: Four,  sections: NONE },
+        Progression { id: "coltrane",   name: "Coltrane cycle",               level: Advanced,     bars: coltrane_cycle(0),      meter: Four,  sections: NONE },
+        Progression { id: "sowhat",     name: "So What - full AABA",          level: Standard,     bars: so_what(),              meter: Four,  sections: AABA_32 },
+        Progression { id: "bluebossa",  name: "Blue Bossa",                   level: Standard,     bars: blue_bossa(),           meter: Four,  sections: NONE },
+        Progression { id: "atrain",     name: "Take the A Train (A)",         level: Standard,     bars: a_train(),              meter: Four,  sections: NONE },
+        Progression { id: "rhythma",    name: "Rhythm Changes (A) - Bb",      level: Standard,     bars: rhythm_a(),             meter: Four,  sections: NONE },
+        Progression { id: "rhythmfull", name: "Rhythm Changes - full AABA",   level: Standard,     bars: rhythm_full(),          meter: Four,  sections: AABA_32 },
+        Progression { id: "attya",      name: "All the Things You Are",       level: Standard,     bars: all_the_things(),       meter: Four,  sections: &[(0, "A"), (8, "A"), (16, "B"), (24, "A")] },
+        Progression { id: "allofme",    name: "All of Me",                    level: Standard,     bars: all_of_me(),            meter: Four,  sections: &[(0, "A"), (8, "B"), (16, "A"), (24, "C")] },
+        Progression { id: "flymoon",    name: "Fly Me to the Moon",           level: Standard,     bars: fly_me_to_the_moon(),   meter: Four,  sections: &[(0, "A"), (16, "B")] },
+        Progression { id: "misty",      name: "Misty",                        level: Standard,     bars: misty(),                meter: Four,  sections: AABA_32 },
+        Progression { id: "tuneup",     name: "Tune Up",                      level: Standard,     bars: tune_up(),              meter: Four,  sections: NONE },
+        Progression { id: "solar",      name: "Solar",                        level: Standard,     bars: solar(),                meter: Four,  sections: NONE },
+        Progression { id: "cantaloupe", name: "Cantaloupe Island",            level: Standard,     bars: cantaloupe_island(),    meter: Four,  sections: NONE },
     ]
 }
 
@@ -500,6 +530,17 @@ mod tests {
         // Both G7s pull back to C minor: altered.
         assert_eq!(b[9].chord_at(3).scale_name(), ALTERED);
         assert_eq!(b[11].chord_at(3).scale_name(), ALTERED);
+    }
+
+    #[test]
+    fn waltz_forms_carry_their_meter() {
+        let p = all();
+        let by = |id: &str| p.iter().find(|q| q.id == id).unwrap();
+        assert_eq!(by("waltzblues").meter, Meter::Three);
+        assert_eq!(by("waltz251").meter, Meter::Three);
+        assert_eq!(by("sowhat").meter, Meter::Four);
+        // The waltz blues shares the 4/4 blues' changes — only the meter differs.
+        assert_eq!(syms(&by("waltzblues").bars), syms(&by("blues").bars));
     }
 
     #[test]
