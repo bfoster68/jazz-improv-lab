@@ -142,6 +142,9 @@ beat one with a lead note on three, the waltz ride with the skip on the and of
 two, comping over six eighth slots — exercised by "ii-V-I jazz waltz" and
 "Jazz-waltz Blues in F". Split bars and the two-feel remain 4/4-only ideas.
 Adding 6/4 or 6/8 later means a new `Meter` variant plus its own arranger arm.
+The waltz feel is a first pass the user expects to tune by ear; the knobs are
+in `plan_bar_three` — the beat-three lead-note chance (0.65), the ride accent
+gains, and the comping slot pools.
 
 Since then, in this order: fixed invisible UI text (bevy_egui needs the
 `default_fonts` feature); anchored the transport to an `epoch` so restarting or
