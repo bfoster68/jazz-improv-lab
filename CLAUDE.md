@@ -74,7 +74,7 @@ tests-web/                Playwright suites for the browser app
 ```bash
 # Rust
 cd rust
-cargo test -p jazz-theory -p jazz-audio   # 149 tests, ~2s, no audio device needed
+cargo test -p jazz-theory -p jazz-audio   # 155 tests, ~2s, no audio device needed
 cargo test -p jazz-audio --features soundfont   # includes the SoundFont paths
 cargo check --workspace                  # includes the Bevy app
 cargo run -p jazz-audio --bin render-wav -- --list
@@ -126,7 +126,7 @@ cd docs && node build-docx.js
 
 ## Where things stand
 
-Last verified state: **149 tests pass** (95 theory + 54 audio), `cargo check
+Last verified state: **155 tests pass** (95 theory + 60 audio), `cargo check
 --workspace` is clean with no warnings, and `jazz-app` builds, links, and has
 been run and heard on real hardware.
 
@@ -154,6 +154,17 @@ than `clamp_bass` on purpose, so approach notes keep their contour), Pedal
 point (the form's opening root held under the changes) and Syncopated (a
 deliberately deterministic off-beat pattern anticipating the next chord — a
 groove that varies is not a groove). Tests pin each style's defining property.
+
+The comping has five selectable styles (`CompStyle`, the "Style" dropdown on
+the comp row, `--comp-style` in render-wav), in both meters: Rhythmic (the
+density-pool default — Feel only shapes this and Guide tones), Charleston,
+Four to the bar, Sustained, and Guide tones (`comp_shells`: just the 3rd and
+7th). A chosen figure is never overridden by the walking bass's two-feel bars.
+
+**The horn section is temporarily disabled** pending a rework: `HORNS_ENABLED
+= false` in main.rs hides its mixer row and keeps jam presets horn-free
+("Full band" currently means Busy density). The engine's horn arranger and its
+tests are intact — flip the const to bring it all back.
 
 Masters and Standards are separate tabs. Each `Master` carries a biography —
 born/died (died empty for the living: Severinsen, Sandoval), a `bio`

@@ -10,23 +10,24 @@
 
 use std::io::Write;
 
-use jazz_audio::engine::{plan_bar, BassStyle, Density, Rng, Settings};
+use jazz_audio::engine::{plan_bar, BassStyle, CompStyle, Density, Rng, Settings};
 
-/// Map a name on the command line to a bass style. "pedal" is enough for
-/// "Pedal point"; hyphens are optional.
-fn parse_bass_style(name: &str) -> BassStyle {
+/// Match a CLI name against a set of style labels: exact, with hyphens and
+/// spaces collapsed ("fourtothebar"), or by first word ("pedal" is enough for
+/// "Pedal point"). Unknown names are an error, never a silent fallback.
+fn match_style<T: Copy>(name: &str, all: &[T], label: fn(T) -> &'static str, kind: &str) -> T {
     let wanted = name.to_ascii_lowercase();
-    let found = BassStyle::ALL.iter().copied().find(|s| {
-        let label = s.label().to_ascii_lowercase();
-        label == wanted
-            || label.replace('-', "") == wanted
-            || label.split(' ').next() == Some(wanted.as_str())
+    let found = all.iter().copied().find(|&s| {
+        let l = label(s).to_ascii_lowercase();
+        l == wanted
+            || l.replace(['-', ' '], "") == wanted
+            || l.split(' ').next() == Some(wanted.as_str())
     });
     match found {
         Some(s) => s,
         None => {
-            let names: Vec<&str> = BassStyle::ALL.iter().map(|s| s.label()).collect();
-            eprintln!("Unknown bass style '{name}'. Choices: {}", names.join(", "));
+            let names: Vec<&str> = all.iter().map(|&s| label(s)).collect();
+            eprintln!("Unknown {kind} '{name}'. Choices: {}", names.join(", "));
             std::process::exit(2);
         }
     }
@@ -153,7 +154,14 @@ fn main() -> std::io::Result<()> {
             "--horn-inst" => settings.horn_inst = parse_instrument(&val(&mut i)),
             "--comp-inst" => settings.comp_inst = parse_instrument(&val(&mut i)),
             "--bass-inst" => settings.bass_inst = parse_instrument(&val(&mut i)),
-            "--bass-style" => settings.bass_style = parse_bass_style(&val(&mut i)),
+            "--bass-style" => {
+                settings.bass_style =
+                    match_style(&val(&mut i), &BassStyle::ALL, BassStyle::label, "bass style")
+            }
+            "--comp-style" => {
+                settings.comp_style =
+                    match_style(&val(&mut i), &CompStyle::ALL, CompStyle::label, "comp style")
+            }
             other if !other.starts_with('-') => id = other.to_string(),
             other => eprintln!("(ignoring unknown flag {other})"),
         }

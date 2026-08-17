@@ -83,6 +83,44 @@ impl BassStyle {
     }
 }
 
+/// How the comping instrument places its chords.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompStyle {
+    /// Varied syncopated hits from the density pools — the default pianist.
+    /// The Feel (density) setting shapes this style and Guide tones; the
+    /// fixed figures below ignore it.
+    Rhythmic,
+    /// The classic figure: a long chord on one, a push on the and of two.
+    Charleston,
+    /// Soft quarter-note chords on every beat, rhythm-guitar style.
+    FourToBar,
+    /// One voicing held through the bar.
+    Sustained,
+    /// The density-pool rhythms voiced with only the 3rd and 7th — the
+    /// curriculum's guide tones, comped.
+    GuideTones,
+}
+
+impl CompStyle {
+    pub const ALL: [CompStyle; 5] = [
+        CompStyle::Rhythmic,
+        CompStyle::Charleston,
+        CompStyle::FourToBar,
+        CompStyle::Sustained,
+        CompStyle::GuideTones,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            CompStyle::Rhythmic => "Rhythmic",
+            CompStyle::Charleston => "Charleston",
+            CompStyle::FourToBar => "Four to the bar",
+            CompStyle::Sustained => "Sustained",
+            CompStyle::GuideTones => "Guide tones",
+        }
+    }
+}
+
 /// Eighth-note slots in a bar: 0 = beat 1, 1 = the "and", 2 = beat 2 …
 const SPARSE: &[&[usize]] = &[&[0], &[4], &[3], &[6], &[1], &[0, 4]];
 const MEDIUM: &[&[usize]] = &[
@@ -211,6 +249,21 @@ pub fn comp_voicing(slot: &Slot, rng: &mut Rng) -> Vec<i32> {
     v
 }
 
+/// Just the guide tones — the 3rd and the 7th — in the comping register. The
+/// thinnest voicing there is, and the two notes the curriculum keeps pointing
+/// the student's ear at.
+pub fn comp_shells(slot: &Slot) -> Vec<i32> {
+    let ints = slot.quality.ints();
+    let mut base = midi_for(slot.root, 4);
+    while base < 58 {
+        base += 12;
+    }
+    while base > 69 {
+        base -= 12;
+    }
+    vec![base + ints[1], base + ints[3]]
+}
+
 /// Everything that should sound during one bar.
 #[derive(Debug, Clone, Default)]
 pub struct BarPlan {
@@ -237,6 +290,7 @@ pub struct Settings {
     pub bass_style: BassStyle,
     pub chords: bool,
     pub comp_inst: Instrument,
+    pub comp_style: CompStyle,
     /// A sustained horn-section pad over the changes.
     pub horns: bool,
     pub horn_inst: Instrument,
@@ -255,6 +309,7 @@ impl Default for Settings {
             bass_style: BassStyle::Walking,
             chords: true,
             comp_inst: Instrument::Keys,
+            comp_style: CompStyle::Rhythmic,
             horns: false,
             horn_inst: Instrument::Sax,
             drums: true,
@@ -470,25 +525,61 @@ fn plan_bar_four(
     if settings.chords {
         let first = bar.chord_at(0);
         let second = bar.chord_at(2);
-        let v1 = comp_voicing(&first, rng);
-        let v2 = if bar.is_split() { comp_voicing(&second, rng) } else { v1.clone() };
-        let vnext = comp_voicing(&next.chord_at(0), rng);
-        if plan.two_feel {
-            for &m in &v1 {
-                plan.notes.push(Event { offset: 0.0, midi: m, gain: 0.055, dur: spb * 1.5, instrument: settings.comp_inst });
+        // Guide tones swap the voicing, not the rhythm.
+        let voice = |slot: &Slot, rng: &mut Rng| -> Vec<i32> {
+            match settings.comp_style {
+                CompStyle::GuideTones => comp_shells(slot),
+                _ => comp_voicing(slot, rng),
             }
-        } else {
-            let p = pool(settings.density);
-            let hits = p[rng.below(p.len())];
-            for &slot in hits {
-                let beat = slot / 2;
-                let on_and = slot % 2 == 1;
-                let offset = beat as f32 * spb + if on_and { swing_off } else { 0.0 };
-                // the "and" of 4 anticipates the next chord
-                let voicing = if slot == 7 { &vnext } else if beat >= 2 { &v2 } else { &v1 };
-                let (gain, dur) = if on_and { (0.053, spb * 0.65) } else { (0.060, spb * 0.85) };
-                for &m in voicing {
-                    plan.notes.push(Event { offset, midi: m, gain, dur, instrument: settings.comp_inst });
+        };
+        let v1 = voice(&first, rng);
+        let v2 = if bar.is_split() { voice(&second, rng) } else { v1.clone() };
+        let vnext = voice(&next.chord_at(0), rng);
+        let hit = |plan: &mut BarPlan, offset: f32, v: &[i32], gain: f32, dur: f32| {
+            for &m in v {
+                plan.notes.push(Event { offset, midi: m, gain, dur, instrument: settings.comp_inst });
+            }
+        };
+        match settings.comp_style {
+            // The pool styles keep today's behaviour, including the occasional
+            // sustained two-feel bar. A chosen figure below is never overridden.
+            CompStyle::Rhythmic | CompStyle::GuideTones => {
+                if plan.two_feel {
+                    hit(&mut plan, 0.0, &v1, 0.055, spb * 1.5);
+                } else {
+                    let p = pool(settings.density);
+                    let hits = p[rng.below(p.len())];
+                    for &s in hits {
+                        let beat = s / 2;
+                        let on_and = s % 2 == 1;
+                        let offset = beat as f32 * spb + if on_and { swing_off } else { 0.0 };
+                        // the "and" of 4 anticipates the next chord
+                        let voicing = if s == 7 { &vnext } else if beat >= 2 { &v2 } else { &v1 };
+                        let (gain, dur) = if on_and { (0.053, spb * 0.65) } else { (0.060, spb * 0.85) };
+                        hit(&mut plan, offset, voicing, gain, dur);
+                    }
+                }
+            }
+            CompStyle::Charleston => {
+                // The figure is locked; only the touch breathes.
+                hit(&mut plan, 0.0, &v1, 0.058 + rng.next_f32() * 0.006, spb * 1.4);
+                hit(&mut plan, spb + swing_off, &v1, 0.050 + rng.next_f32() * 0.006, spb * 0.5);
+                if bar.is_split() {
+                    hit(&mut plan, 2.0 * spb, &v2, 0.055, spb * 1.2);
+                }
+            }
+            CompStyle::FourToBar => {
+                for beat in 0..4 {
+                    let v = if beat >= 2 { &v2 } else { &v1 };
+                    hit(&mut plan, beat as f32 * spb, v, 0.045, spb * 0.6);
+                }
+            }
+            CompStyle::Sustained => {
+                if bar.is_split() {
+                    hit(&mut plan, 0.0, &v1, 0.055, spb * 1.9);
+                    hit(&mut plan, 2.0 * spb, &v2, 0.055, spb * 1.9);
+                } else {
+                    hit(&mut plan, 0.0, &v1, 0.055, spb * 3.8);
                 }
             }
         }
@@ -637,25 +728,51 @@ fn plan_bar_three(
         }
     }
 
-    // ---- comping: six eighth-note slots; beat two carries the waltz ----
+    // ---- comping ----
     if settings.chords {
-        let v = comp_voicing(&slot, rng);
-        let vnext = comp_voicing(&next.chord_at(0), rng);
-        let pool: &[&[usize]] = match settings.density {
-            Density::Sparse => &[&[2], &[3], &[0]],
-            Density::Medium => &[&[2], &[3], &[2, 5], &[0, 3]],
-            Density::Busy => &[&[1, 3], &[2, 5], &[0, 3, 5], &[3, 4]],
+        let v = match settings.comp_style {
+            CompStyle::GuideTones => comp_shells(&slot),
+            _ => comp_voicing(&slot, rng),
         };
-        let hits = pool[rng.below(pool.len())];
-        for &s in hits {
-            let beat = s / 2;
-            let on_and = s % 2 == 1;
-            let offset = beat as f32 * spb + if on_and { swing_off } else { 0.0 };
-            // the and of three anticipates the next chord
-            let voicing = if s == 5 { &vnext } else { &v };
-            let (gain, dur) = if on_and { (0.053, spb * 0.6) } else { (0.060, spb * 0.8) };
-            for &m in voicing {
+        let vnext = match settings.comp_style {
+            CompStyle::GuideTones => comp_shells(&next.chord_at(0)),
+            _ => comp_voicing(&next.chord_at(0), rng),
+        };
+        let hit = |plan: &mut BarPlan, offset: f32, v: &[i32], gain: f32, dur: f32| {
+            for &m in v {
                 plan.notes.push(Event { offset, midi: m, gain, dur, instrument: settings.comp_inst });
+            }
+        };
+        match settings.comp_style {
+            // Six eighth-note slots; beat two carries the waltz.
+            CompStyle::Rhythmic | CompStyle::GuideTones => {
+                let pool: &[&[usize]] = match settings.density {
+                    Density::Sparse => &[&[2], &[3], &[0]],
+                    Density::Medium => &[&[2], &[3], &[2, 5], &[0, 3]],
+                    Density::Busy => &[&[1, 3], &[2, 5], &[0, 3, 5], &[3, 4]],
+                };
+                let hits = pool[rng.below(pool.len())];
+                for &s in hits {
+                    let beat = s / 2;
+                    let on_and = s % 2 == 1;
+                    let offset = beat as f32 * spb + if on_and { swing_off } else { 0.0 };
+                    // the and of three anticipates the next chord
+                    let voicing = if s == 5 { &vnext } else { &v };
+                    let (gain, dur) = if on_and { (0.053, spb * 0.6) } else { (0.060, spb * 0.8) };
+                    hit(&mut plan, offset, voicing, gain, dur);
+                }
+            }
+            CompStyle::Charleston => {
+                hit(&mut plan, 0.0, &v, 0.058 + rng.next_f32() * 0.006, spb * 1.3);
+                hit(&mut plan, spb + swing_off, &v, 0.050 + rng.next_f32() * 0.006, spb * 0.5);
+            }
+            CompStyle::FourToBar => {
+                for beat in 0..3 {
+                    hit(&mut plan, beat as f32 * spb, &v, 0.045, spb * 0.6);
+                }
+            }
+            CompStyle::Sustained => {
+                hit(&mut plan, 0.0, &v, 0.055, spb * 2.8);
             }
         }
     }
@@ -982,6 +1099,168 @@ mod tests {
             first.iter().any(|e| (e.offset / spb).fract() > 0.01),
             "a syncopated line with nothing off the beat"
         );
+    }
+
+    #[test]
+    fn every_comp_style_comps_in_both_meters() {
+        let bars = progression::two_five_one(0);
+        for meter in [Meter::Four, Meter::Three] {
+            for style in CompStyle::ALL {
+                let s = Settings {
+                    meter,
+                    comp_style: style,
+                    bass: false,
+                    drums: false,
+                    ..Settings::default()
+                };
+                let mut rng = Rng::new(6);
+                let bar_len = s.bar_len();
+                for i in 0..16 {
+                    let plan = plan_bar(&bars, i, &s, &mut rng);
+                    assert!(!plan.notes.is_empty(), "{style:?} in {meter:?} was silent");
+                    for e in &plan.notes {
+                        assert!(e.offset < bar_len, "{style:?} in {meter:?}: chord past the barline");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_charleston_locks_its_figure() {
+        let bars = progression::two_five_one(0); // no split bars
+        let s = Settings {
+            comp_style: CompStyle::Charleston,
+            bass: false,
+            drums: false,
+            ..Settings::default()
+        };
+        let mut rng = Rng::new(8);
+        let spb = 60.0 / s.tempo;
+        let push = spb + spb * 2.0 / 3.0; // the swung and of two
+        for i in 0..32 {
+            let plan = plan_bar(&bars, i, &s, &mut rng);
+            let mut onsets: Vec<f32> = plan.notes.iter().map(|e| e.offset).collect();
+            onsets.dedup();
+            assert_eq!(onsets.len(), 2, "bar {i}: the charleston is exactly two hits");
+            assert_eq!(onsets[0], 0.0, "bar {i}: the long chord sits on one");
+            assert!((onsets[1] - push).abs() < 1e-4, "bar {i}: the push lives on the and of two");
+        }
+    }
+
+    #[test]
+    fn four_to_the_bar_sits_on_every_beat() {
+        let bars = progression::blues(5);
+        let s = Settings {
+            comp_style: CompStyle::FourToBar,
+            bass: false,
+            drums: false,
+            ..Settings::default()
+        };
+        let mut rng = Rng::new(2);
+        let spb = 60.0 / s.tempo;
+        for i in 0..24 {
+            let plan = plan_bar(&bars, i, &s, &mut rng);
+            let mut onsets: Vec<f32> = plan.notes.iter().map(|e| e.offset).collect();
+            onsets.dedup();
+            assert_eq!(onsets.len(), 4, "bar {i}: four to the bar means four");
+            for (beat, onset) in onsets.iter().enumerate() {
+                assert!(
+                    (onset - beat as f32 * spb).abs() < 1e-4,
+                    "bar {i}: a chord left the beat"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sustained_holds_one_voicing_through_the_bar() {
+        let bars = progression::two_five_one(0); // no split bars
+        let s = Settings {
+            comp_style: CompStyle::Sustained,
+            bass: false,
+            drums: false,
+            ..Settings::default()
+        };
+        let mut rng = Rng::new(4);
+        let spb = 60.0 / s.tempo;
+        for i in 0..16 {
+            let plan = plan_bar(&bars, i, &s, &mut rng);
+            assert!(plan.notes.iter().all(|e| e.offset == 0.0), "bar {i}: sustained means one attack");
+            assert!(
+                plan.notes.iter().all(|e| e.dur > 3.0 * spb),
+                "bar {i}: the voicing must ring the whole bar"
+            );
+        }
+    }
+
+    #[test]
+    fn guide_tones_comp_only_the_third_and_seventh() {
+        let bars = progression::blues(5); // no split bars
+        let s = Settings {
+            comp_style: CompStyle::GuideTones,
+            bass: false,
+            drums: false,
+            ..Settings::default()
+        };
+        let mut rng = Rng::new(10);
+        for i in 0..48 {
+            let plan = plan_bar(&bars, i, &s, &mut rng);
+            let cur = bars[i % bars.len()].chord_at(0);
+            let nxt = bars[(i + 1) % bars.len()].chord_at(0);
+            let allowed: Vec<i32> = [cur, nxt]
+                .iter()
+                .flat_map(|c| {
+                    let ints = c.quality.ints();
+                    [pc(c.root + ints[1]), pc(c.root + ints[3])]
+                })
+                .collect();
+            for e in &plan.notes {
+                assert!(
+                    allowed.contains(&pc(e.midi)),
+                    "bar {i}: {} is not a guide tone of {} or {}",
+                    e.midi,
+                    cur.symbol(),
+                    nxt.symbol()
+                );
+            }
+            // Every hit is exactly the two shells.
+            let mut onsets: Vec<f32> = plan.notes.iter().map(|e| e.offset).collect();
+            onsets.dedup();
+            assert_eq!(plan.notes.len(), onsets.len() * 2, "bar {i}: a shell has two notes");
+        }
+    }
+
+    #[test]
+    fn a_chosen_figure_survives_the_two_feel() {
+        // The walking bass still drops into two now and then; an explicitly
+        // chosen comping figure must keep playing through those bars.
+        let bars = progression::two_five_one(0);
+        let s = Settings {
+            comp_style: CompStyle::Charleston,
+            drums: false,
+            ..Settings::default()
+        };
+        let mut rng = Rng::new(14);
+        let spb = 60.0 / s.tempo;
+        let push = spb + spb * 2.0 / 3.0;
+        let mut two_feel_bars = 0;
+        for i in 0..200 {
+            let plan = plan_bar(&bars, i, &s, &mut rng);
+            if plan.two_feel {
+                two_feel_bars += 1;
+            }
+            let mut comp: Vec<f32> = plan
+                .notes
+                .iter()
+                .filter(|e| e.instrument == s.comp_inst)
+                .map(|e| e.offset)
+                .collect();
+            comp.dedup();
+            assert_eq!(comp.len(), 2, "bar {i}: the charleston vanished");
+            assert!((comp[1] - push).abs() < 1e-4);
+        }
+        assert!(two_feel_bars > 0, "the test never exercised a two-feel bar");
     }
 
     #[test]
