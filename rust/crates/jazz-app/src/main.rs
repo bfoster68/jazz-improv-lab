@@ -801,7 +801,7 @@ fn masters_ui(ui: &mut egui::Ui, state: &mut AppState) {
     if let Some(i) = state.selected_master {
         let m = &MASTERS[i];
         egui::ScrollArea::vertical().show(ui, |ui| {
-            if ui.button("\u{2190} All masters").clicked() {
+            if ui.button("\u{25C0} All masters").clicked() {
                 state.selected_master = None;
             }
             ui.add_space(8.0);
@@ -857,7 +857,7 @@ fn masters_ui(ui: &mut egui::Ui, state: &mut AppState) {
                     ui.label(egui::RichText::new(m.name).strong().color(gold));
                     ui.label(egui::RichText::new(format!("{} \u{00B7} {}", m.instrument, m.era)).weak());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(egui::RichText::new("their story \u{2192}").weak());
+                        ui.label(egui::RichText::new("their story \u{25B6}").weak());
                     });
                 });
                 ui.label(m.listen_for);

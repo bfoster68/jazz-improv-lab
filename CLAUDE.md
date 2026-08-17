@@ -119,6 +119,9 @@ cd docs && node build-docx.js
 - **Notation is ASCII internally, glyphs at the edge.** The theory engine always
   uses `b` and `#`; ♭ and ♯ are substituted only at display time (`fmtMusic` in the
   web app). Never feed glyphs back into the theory layer.
+- **egui's default fonts are missing the arrows.** ▶ ◀ ⏸ – — · all render, but
+  ← and → come out as boxes. Use the triangle glyphs for direction cues; a
+  screenshot is the only thing that catches a missing glyph.
 
 
 ## Where things stand
