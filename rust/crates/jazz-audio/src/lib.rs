@@ -25,6 +25,7 @@
 #![forbid(unsafe_code)]
 
 pub mod engine;
+pub mod solo;
 #[cfg(feature = "soundfont")]
 pub mod soundfont;
 pub mod stream;

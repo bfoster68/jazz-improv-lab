@@ -150,6 +150,8 @@ fn main() -> std::io::Result<()> {
             "--no-chords" => settings.chords = false,
             "--no-drums" => settings.drums = false,
             "--horns" => settings.horns = true,
+            "--solo" => settings.solo = true,
+            "--solo-inst" => settings.solo_inst = parse_instrument(&val(&mut i)),
             "--soundfont" => sf_path = Some(val(&mut i)),
             // `-inst` suffixes so none of these collide with the `--no-*` part
             // toggles: a bare `--bass <name>` would swallow the progression id.

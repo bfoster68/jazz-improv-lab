@@ -58,6 +58,8 @@ struct AppState {
     /// What is actually making the sound, shown in the transport so nobody has
     /// to guess whether the samples loaded: "FluidR3 GM" or "built-in synth".
     audio_engine: Option<String>,
+    /// Whether the experimental solo-sheet window is open.
+    show_sheet: bool,
     /// Audio-clock time (seconds) at which the current transport started. The
     /// mixer clock free-runs and is never reset, so bars must be scheduled
     /// relative to this epoch rather than to absolute zero — otherwise a restart
@@ -135,6 +137,7 @@ fn main() {
             chart_bar: 0,
             selected_master: None,
             audio_engine: None,
+            show_sheet: false,
             epoch: 0.0,
             sched_rng: Rng::new(0xC0FFEE),
         })
@@ -301,6 +304,128 @@ fn ui(mut contexts: EguiContexts, mut state: ResMut<AppState>, audio: Res<Audio>
         Tab::Masters => masters_ui(ui, &mut state),
         Tab::Standards => standards_ui(ui, &mut state, &audio),
     });
+
+    // The experimental solo sheet floats in its own window so it can sit
+    // beside any tab while the band plays.
+    if state.show_sheet {
+        let mut open = true;
+        egui::Window::new("Idea sheet")
+            .open(&mut open)
+            .default_size([960.0, 420.0])
+            .show(&ctx, |ui| solo_sheet_ui(ui, &state));
+        state.show_sheet = open;
+    }
+}
+
+/// Map a MIDI note to (diatonic staff step, accidental) under a spelling.
+/// Steps count letters from C: C4 (midi 60) is 28, so the treble staff's
+/// bottom line E4 is 30 and its top line F5 is 38.
+fn staff_step(midi: i32, use_sharp: bool) -> (i32, &'static str) {
+    const SHARP: [(i32, &'static str); 12] = [
+        (0, ""), (0, "#"), (1, ""), (1, "#"), (2, ""), (3, ""),
+        (3, "#"), (4, ""), (4, "#"), (5, ""), (5, "#"), (6, ""),
+    ];
+    const FLAT: [(i32, &'static str); 12] = [
+        (0, ""), (1, "b"), (1, ""), (2, "b"), (2, ""), (3, ""),
+        (4, "b"), (4, ""), (5, "b"), (5, ""), (6, "b"), (6, ""),
+    ];
+    let (letter, acc) = if use_sharp {
+        SHARP[midi.rem_euclid(12) as usize]
+    } else {
+        FLAT[midi.rem_euclid(12) as usize]
+    };
+    ((midi / 12 - 1) * 7 + letter, acc)
+}
+
+/// EXPERIMENTAL: the generated solo as a simplified lead sheet — real pitches
+/// on a treble staff, a note's horizontal position inside its bar giving the
+/// rhythm. The solo generator is deterministic, so this recomputes exactly the
+/// notes the band plays; accidentals follow each bar's chord spelling.
+fn solo_sheet_ui(ui: &mut egui::Ui, state: &AppState) {
+    if !state.settings.solo {
+        ui.label("Turn on the Ideas row and the sheet will fill in.");
+        return;
+    }
+    let gold = egui::Color32::from_rgb(224, 166, 60);
+    let ink = ui.visuals().text_color();
+    let faint = ui.visuals().weak_text_color();
+    ui.label(
+        egui::RichText::new(
+            "Phrase ideas over the changes: chord tones on the downbeats, approaches \
+             into the next chord. Where a note sits in its bar is when it sounds. \
+             Sing one, steal it, make it yours.",
+        )
+        .weak()
+        .size(12.0),
+    );
+    ui.add_space(4.0);
+    let bars = &state.bars;
+    let bar_len = state.settings.bar_len();
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        let indices: Vec<usize> = (0..bars.len()).collect();
+        for chunk in indices.chunks(4) {
+            let width = ui.available_width().max(400.0);
+            let (resp, painter) =
+                ui.allocate_painter(egui::vec2(width, 92.0), egui::Sense::hover());
+            let rect = resp.rect;
+            let space = 7.0_f32;
+            let staff_top = rect.top() + 26.0;
+            let bottom_y = staff_top + 4.0 * space; // the E4 line, step 30
+            let y_of = |step: i32| bottom_y - (step - 30) as f32 * (space / 2.0);
+            let left = rect.left() + 8.0;
+            let right = rect.right() - 8.0;
+            for l in 0..5 {
+                let y = staff_top + l as f32 * space;
+                painter.hline(left..=right, y, egui::Stroke::new(1.0, faint));
+            }
+            let bar_w = (right - left) / 4.0;
+            for (k, &bi) in chunk.iter().enumerate() {
+                let x0 = left + k as f32 * bar_w;
+                painter.vline(x0, staff_top..=bottom_y, egui::Stroke::new(1.0, faint));
+                painter.text(
+                    egui::pos2(x0 + 4.0, rect.top() + 2.0),
+                    egui::Align2::LEFT_TOP,
+                    bars[bi].symbol(),
+                    egui::FontId::proportional(11.0),
+                    gold,
+                );
+                let use_sharp = bars[bi].chord_at(0).use_sharp();
+                for e in jazz_audio::solo::solo_bar(bars, bi, &state.settings) {
+                    let x = x0 + 12.0 + (e.offset / bar_len) * (bar_w - 24.0);
+                    let (step, acc) = staff_step(e.midi, use_sharp);
+                    let y = y_of(step);
+                    // Ledger lines below and above the staff.
+                    let mut s = 28;
+                    while s >= step {
+                        painter.hline((x - 5.5)..=(x + 5.5), y_of(s), egui::Stroke::new(1.0, faint));
+                        s -= 2;
+                    }
+                    let mut s = 40;
+                    while s <= step {
+                        painter.hline((x - 5.5)..=(x + 5.5), y_of(s), egui::Stroke::new(1.0, faint));
+                        s += 2;
+                    }
+                    painter.circle_filled(egui::pos2(x, y), 3.4, ink);
+                    let stem = egui::Stroke::new(1.2, ink);
+                    if step < 34 {
+                        painter.vline(x + 3.2, (y - 24.0)..=y, stem);
+                    } else {
+                        painter.vline(x - 3.2, y..=(y + 24.0), stem);
+                    }
+                    if !acc.is_empty() {
+                        painter.text(
+                            egui::pos2(x - 6.0, y),
+                            egui::Align2::RIGHT_CENTER,
+                            acc,
+                            egui::FontId::proportional(11.0),
+                            ink,
+                        );
+                    }
+                }
+            }
+            painter.vline(right, staff_top..=bottom_y, egui::Stroke::new(1.0, faint));
+        }
+    });
 }
 
 /// Match the browser build's dark palette and give the text room to breathe.
@@ -433,6 +558,18 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
                 }
             });
         ui.label(egui::RichText::new("  trombone \u{00B7} sax \u{00B7} trumpet").weak().size(12.0));
+    });
+    ui.horizontal(|ui| {
+        dirty |= ui.checkbox(&mut state.settings.solo, "Ideas").changed();
+        dirty |= instrument_combo(ui, "solo_inst", &mut state.settings.solo_inst, &Instrument::ALL);
+        if ui.button("Sheet").clicked() {
+            state.show_sheet = !state.show_sheet;
+        }
+        ui.label(
+            egui::RichText::new("  experimental: phrase ideas to sing and steal")
+                .weak()
+                .size(12.0),
+        );
     });
     ui.horizontal(|ui| {
         dirty |= ui.checkbox(&mut state.settings.drums, "Drums").changed();
@@ -973,6 +1110,7 @@ fn start_jam(state: &mut AppState, audio: &Audio, st: &Standard, full_band: bool
     state.settings.drums = true;
     state.settings.horns = full_band;
     state.settings.horn_style = HornStyle::Pads;
+    state.settings.solo = false; // the jam presets back *your* solo
     state.settings.density = if full_band { Density::Medium } else { Density::Sparse };
     load_progression(state, audio, i, true);
     state.tab = Tab::PlayAlong;

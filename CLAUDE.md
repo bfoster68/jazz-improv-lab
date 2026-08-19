@@ -74,7 +74,7 @@ tests-web/                Playwright suites for the browser app
 ```bash
 # Rust
 cd rust
-cargo test -p jazz-theory -p jazz-audio   # 161 tests, ~2s, no audio device needed
+cargo test -p jazz-theory -p jazz-audio   # 166 tests, ~2s, no audio device needed
 cargo test -p jazz-audio --features soundfont   # includes the SoundFont paths
 cargo check --workspace                  # includes the Bevy app
 cargo run -p jazz-audio --bin render-wav -- --list
@@ -126,7 +126,7 @@ cd docs && node build-docx.js
 
 ## Where things stand
 
-Last verified state: **161 tests pass** (95 theory + 66 audio), `cargo check
+Last verified state: **166 tests pass** (95 theory + 71 audio), `cargo check
 --workspace` is clean with no warnings, and `jazz-app` builds, links, and has
 been run and heard on real hardware.
 
@@ -171,6 +171,17 @@ voice-led voicing across trombone (bottom, dropped an octave), tenor sax
 (two bars on, two off, the second breath softer), and the push / backbeat /
 call / shout riffs, all deterministic per bar because backgrounds are parts,
 not solos. "Full band" jam preset = horns on with Pads.
+
+**EXPERIMENTAL — the idea generator** (`jazz_audio::solo`, the "Ideas" mixer
+row): short singable phrases over the changes for the student to steal — chord
+tones on downbeats, lines that walk each bar's *suggested* scale (altered V7s
+get altered ideas), chromatic approaches into the next chord, enclosure
+pickups, four-bar phrasing with breaths. Stateless and deterministic per
+(form, bar, settings): a re-listen plays the same solo, and the "Sheet" button
+opens a window that redraws exactly those notes as simplified notation
+(treble staff, real spelling per the bar's chord, proportional rhythm) via
+`solo_sheet_ui`/`staff_step` in main.rs. May or may not become permanent —
+everything lives in solo.rs + one hook per meter + the sheet fns.
 
 Masters and Standards are separate tabs. Each `Master` carries a biography —
 born/died (died empty for the living: Severinsen, Sandoval), a `bio`

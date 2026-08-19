@@ -388,6 +388,9 @@ pub struct Settings {
     pub horns: bool,
     pub horn_style: HornStyle,
     pub drums: bool,
+    /// EXPERIMENTAL: the computer takes a chorus. See [`crate::solo`].
+    pub solo: bool,
+    pub solo_inst: Instrument,
 }
 
 impl Default for Settings {
@@ -406,6 +409,8 @@ impl Default for Settings {
             horns: false,
             horn_style: HornStyle::Pads,
             drums: true,
+            solo: false,
+            solo_inst: Instrument::Sax,
         }
     }
 }
@@ -757,6 +762,12 @@ fn plan_bar_four(
         }
     }
 
+
+    // ---- solo (experimental): the computer takes a chorus ----
+    if settings.solo {
+        plan.notes.extend(crate::solo::solo_bar(bars, index, settings));
+    }
+
     plan
 }
 
@@ -950,6 +961,12 @@ fn plan_bar_three(
                 plan.perc.push(PercEvent { offset: 2.0 * spb + i * spb, kind: PercRole::Brush, gain: g });
             }
         }
+    }
+
+
+    // ---- solo (experimental): the computer takes a chorus ----
+    if settings.solo {
+        plan.notes.extend(crate::solo::solo_bar(bars, index, settings));
     }
 
     plan
