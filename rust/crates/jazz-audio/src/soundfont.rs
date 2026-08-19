@@ -100,7 +100,6 @@ pub struct SoundfontVoices {
     rendered_to: f32,
     left: Vec<f32>,
     right: Vec<f32>,
-    mono: Vec<f32>,
 }
 
 impl SoundfontVoices {
@@ -120,7 +119,10 @@ impl SoundfontVoices {
     /// Build from an already-parsed SoundFont — used on the web, where the file
     /// arrives as bytes rather than a path.
     pub fn from_soundfont(sf: Arc<SoundFont>, sample_rate: f32) -> Result<Self, String> {
-        let settings = SynthesizerSettings::new(sample_rate as i32);
+        let mut settings = SynthesizerSettings::new(sample_rate as i32);
+        // The synth's own reverb and chorus are a large part of a GM set
+        // sounding like a record instead of a bone-dry sample player.
+        settings.enable_reverb_and_chorus = true;
         let mut synth = Synthesizer::new(&sf, &settings)
             .map_err(|e| format!("could not start the synthesizer: {e}"))?;
         for inst in Instrument::ALL {
@@ -134,7 +136,6 @@ impl SoundfontVoices {
             rendered_to: 0.0,
             left: Vec::new(),
             right: Vec::new(),
-            mono: Vec::new(),
         })
     }
 
@@ -171,14 +172,16 @@ impl SoundfontVoices {
         self.notes.retain(|n| n.at < from);
     }
 
-    /// Render `frames` mono samples covering the window starting at `start_time`,
-    /// returning a slice of an internal buffer — no allocation, safe for the
-    /// real-time callback.
+    /// Render `frames` of stereo covering the window starting at `start_time`,
+    /// returning (left, right) slices of internal buffers — no allocation, safe
+    /// for the real-time callback. Stereo is kept all the way out: folding the
+    /// synth's chorused, reverberant image down to mono phase-cancels the
+    /// detuned layers and leaves the samples sounding hollow.
     ///
     /// Events due inside the window fire before rendering. Note-offs fire before
     /// note-ons so a re-attack of the same key in one window is not killed by the
     /// previous note's release.
-    pub fn render_mono(&mut self, frames: usize, start_time: f32, dt: f32) -> &[f32] {
+    pub fn render_stereo(&mut self, frames: usize, start_time: f32, dt: f32) -> (&[f32], &[f32]) {
         let end = start_time + frames as f32 * dt;
 
         let mut i = 0;
@@ -205,15 +208,10 @@ impl SoundfontVoices {
         if self.left.len() != frames {
             self.left.resize(frames, 0.0);
             self.right.resize(frames, 0.0);
-            self.mono.resize(frames, 0.0);
         }
         self.synth.render(&mut self.left, &mut self.right);
-        // The rest of the engine is mono, so fold the stereo render down.
-        for ((m, l), r) in self.mono.iter_mut().zip(&self.left).zip(&self.right) {
-            *m = (l + r) * 0.5;
-        }
         self.rendered_to = end;
-        &self.mono
+        (&self.left, &self.right)
     }
 }
 
@@ -252,6 +250,9 @@ mod tests {
         assert!(velocity_for(0.01) >= 24, "floor must keep ghost notes audible");
         assert!(velocity_for(0.5) <= 127);
         assert!(velocity_for(0.1) > velocity_for(0.05), "mapping must stay monotonic");
+        // A lead voice (the idea generator, ~0.15) must reach the bright sample
+        // layers, not the breathy subtone ones.
+        assert!(velocity_for(0.15) >= 90, "the lead still whispers");
     }
 
     #[test]

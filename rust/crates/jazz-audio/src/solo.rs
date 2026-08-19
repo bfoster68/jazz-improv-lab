@@ -158,7 +158,9 @@ pub fn solo_bar(bars: &[Bar], index: usize, settings: &Settings) -> Vec<Event> {
         let end = picks.get(n + 1).map(|&(s2, _)| offset_of(s2)).unwrap_or(bar_len);
         let dur = ((end - start) * 0.92).max(0.12);
         let strong = s % 2 == 0;
-        let gain = if strong { 0.105 } else { 0.09 } + rng.next_f32() * 0.01;
+        // A lead voice: hot enough that the sampled instruments speak from
+        // their bright layers instead of the breathy subtone ones.
+        let gain = if strong { 0.15 } else { 0.13 } + rng.next_f32() * 0.015;
         out.push(Event { offset: start, midi: m, gain, dur, instrument: inst });
     }
     out

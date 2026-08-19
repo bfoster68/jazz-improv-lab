@@ -90,9 +90,11 @@ fn render_with_soundfont(
     for i in 0..total_bars {
         handle.schedule(plan_bar(bars, i, settings, &mut rng), i as f32 * bar_len);
     }
-    let mut out = vec![0.0f32; (tail * sr) as usize];
-    for chunk in out.chunks_mut(512) {
-        core.fill(chunk, 1);
+    // Stereo, through the same fill() the live callback uses, so the WAV
+    // carries the SoundFont's real image (chorus, reverb, panning).
+    let mut out = vec![0.0f32; (tail * sr) as usize * 2];
+    for chunk in out.chunks_mut(1024) {
+        core.fill(chunk, 2);
     }
     out
 }
@@ -206,7 +208,8 @@ fn main() -> std::io::Result<()> {
         }
     };
 
-    write_wav(&out, &samples, SR as u32)?;
+    let channels: u16 = if sf_path.is_some() { 2 } else { 1 };
+    write_wav(&out, &samples, SR as u32, channels)?;
 
     let peak = samples.iter().fold(0.0f32, |a, b| a.max(b.abs()));
     println!(
@@ -216,7 +219,7 @@ fn main() -> std::io::Result<()> {
         choruses,
         settings.tempo,
         if settings.swing { " swung" } else { " straight" },
-        samples.len() as f32 / SR,
+        samples.len() as f32 / SR / channels as f32,
         peak,
         out
     );
@@ -224,18 +227,19 @@ fn main() -> std::io::Result<()> {
 }
 
 /// Minimal 16-bit mono WAV writer.
-fn write_wav(path: &str, samples: &[f32], sample_rate: u32) -> std::io::Result<()> {
+fn write_wav(path: &str, samples: &[f32], sample_rate: u32, channels: u16) -> std::io::Result<()> {
     let mut f = std::io::BufWriter::new(std::fs::File::create(path)?);
     let data_len = (samples.len() * 2) as u32;
+    let block_align = channels as u32 * 2;
     f.write_all(b"RIFF")?;
     f.write_all(&(36 + data_len).to_le_bytes())?;
     f.write_all(b"WAVEfmt ")?;
     f.write_all(&16u32.to_le_bytes())?;
     f.write_all(&1u16.to_le_bytes())?; // PCM
-    f.write_all(&1u16.to_le_bytes())?; // mono
+    f.write_all(&channels.to_le_bytes())?;
     f.write_all(&sample_rate.to_le_bytes())?;
-    f.write_all(&(sample_rate * 2).to_le_bytes())?;
-    f.write_all(&2u16.to_le_bytes())?;
+    f.write_all(&(sample_rate * block_align).to_le_bytes())?;
+    f.write_all(&(block_align as u16).to_le_bytes())?;
     f.write_all(&16u16.to_le_bytes())?;
     f.write_all(b"data")?;
     f.write_all(&data_len.to_le_bytes())?;

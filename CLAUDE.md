@@ -74,7 +74,7 @@ tests-web/                Playwright suites for the browser app
 ```bash
 # Rust
 cd rust
-cargo test -p jazz-theory -p jazz-audio   # 166 tests, ~2s, no audio device needed
+cargo test -p jazz-theory -p jazz-audio   # 167 tests, ~2s, no audio device needed
 cargo test -p jazz-audio --features soundfont   # includes the SoundFont paths
 cargo check --workspace                  # includes the Bevy app
 cargo run -p jazz-audio --bin render-wav -- --list
@@ -126,7 +126,7 @@ cd docs && node build-docx.js
 
 ## Where things stand
 
-Last verified state: **166 tests pass** (95 theory + 71 audio), `cargo check
+Last verified state: **167 tests pass** (95 theory + 72 audio), `cargo check
 --workspace` is clean with no warnings, and `jazz-app` builds, links, and has
 been run and heard on real hardware.
 

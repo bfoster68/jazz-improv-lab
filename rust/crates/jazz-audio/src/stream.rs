@@ -244,32 +244,47 @@ impl AudioCore {
 
         let frames = out.len() / channels.max(1);
 
-        // The SoundFont renders in blocks into a buffer it owns — no allocation
-        // here; this runs on the real-time thread.
+        // The SoundFont renders stereo into buffers it owns — no allocation
+        // here; this runs on the real-time thread. Its stereo image (chorus,
+        // reverb, per-sample panning) is kept all the way to the device:
+        // folding it to mono phase-cancels the detuned layers and leaves the
+        // samples sounding hollow. The synth drums stay centred.
         #[cfg(feature = "soundfont")]
-        let sf_block: Option<&[f32]> = match self.sf.as_mut() {
+        let sf_blocks: Option<(&[f32], &[f32])> = match self.sf.as_mut() {
             Some(sf) => {
                 let t = self.mixer.time();
                 let dt = 1.0 / self.mixer.sample_rate();
-                Some(sf.render_mono(frames, t, dt))
+                Some(sf.render_stereo(frames, t, dt))
             }
             None => None,
         };
         #[cfg(not(feature = "soundfont"))]
-        let sf_block: Option<&[f32]> = None;
+        let sf_blocks: Option<(&[f32], &[f32])> = None;
 
         for (i, frame) in out.chunks_mut(channels.max(1)).enumerate() {
             // `tick` applies the master volume to the synth voices; the SoundFont
-            // block is raw, so scale it here too — otherwise the volume slider
-            // would control only the drums whenever a soundfont is loaded.
-            let mut s = self.mixer.tick();
-            if let Some(block) = &sf_block {
-                if let Some(v) = block.get(i) {
-                    s = crate::soft_clip(s + *v * self.mixer.volume);
+            // blocks are raw, so scale them here too — otherwise the volume
+            // slider would control only the drums whenever a soundfont is loaded.
+            let s = self.mixer.tick();
+            match (&sf_blocks, frame.len()) {
+                (Some((lb, rb)), 1) => {
+                    // A mono device gets the unavoidable fold-down.
+                    let m = (lb.get(i).unwrap_or(&0.0) + rb.get(i).unwrap_or(&0.0)) * 0.5;
+                    frame[0] = crate::soft_clip(s + m * self.mixer.volume);
                 }
-            }
-            for o in frame.iter_mut() {
-                *o = s;
+                (Some((lb, rb)), _) => {
+                    let l = crate::soft_clip(s + lb.get(i).unwrap_or(&0.0) * self.mixer.volume);
+                    let r = crate::soft_clip(s + rb.get(i).unwrap_or(&0.0) * self.mixer.volume);
+                    frame[0] = l;
+                    for o in frame[1..].iter_mut() {
+                        *o = r;
+                    }
+                }
+                (None, _) => {
+                    for o in frame.iter_mut() {
+                        *o = s;
+                    }
+                }
             }
         }
 
