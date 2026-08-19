@@ -74,7 +74,7 @@ tests-web/                Playwright suites for the browser app
 ```bash
 # Rust
 cd rust
-cargo test -p jazz-theory -p jazz-audio   # 157 tests, ~2s, no audio device needed
+cargo test -p jazz-theory -p jazz-audio   # 161 tests, ~2s, no audio device needed
 cargo test -p jazz-audio --features soundfont   # includes the SoundFont paths
 cargo check --workspace                  # includes the Bevy app
 cargo run -p jazz-audio --bin render-wav -- --list
@@ -126,7 +126,7 @@ cd docs && node build-docx.js
 
 ## Where things stand
 
-Last verified state: **157 tests pass** (95 theory + 62 audio), `cargo check
+Last verified state: **161 tests pass** (95 theory + 66 audio), `cargo check
 --workspace` is clean with no warnings, and `jazz-app` builds, links, and has
 been run and heard on real hardware.
 
@@ -165,10 +165,12 @@ Voicings voice-lead: comp_voicing places the classic A/B rootless forms
 transposing one shape; sampled velocities use a square-root curve
 (velocity_for) so the comping does not whisper under the bass.
 
-**The horn section is temporarily disabled** pending a rework: `HORNS_ENABLED
-= false` in main.rs hides its mixer row and keeps jam presets horn-free
-("Full band" currently means Busy density). The engine's horn arranger and its
-tests are intact — flip the const to bring it all back.
+The horns are a real three-piece section: `section_voices` spreads the
+voice-led voicing across trombone (bottom, dropped an octave), tenor sax
+(middle) and trumpet (top). `HornStyle` picks the arranged background — Pads
+(two bars on, two off, the second breath softer), and the push / backbeat /
+call / shout riffs, all deterministic per bar because backgrounds are parts,
+not solos. "Full band" jam preset = horns on with Pads.
 
 Masters and Standards are separate tabs. Each `Master` carries a biography —
 born/died (died empty for the living: Severinsen, Sandoval), a `bio`

@@ -10,18 +10,20 @@
 
 use std::io::Write;
 
-use jazz_audio::engine::{plan_bar, BassStyle, CompStyle, Density, Rng, Settings};
+use jazz_audio::engine::{plan_bar, BassStyle, CompStyle, Density, HornStyle, Rng, Settings};
 
-/// Match a CLI name against a set of style labels: exact, with hyphens and
-/// spaces collapsed ("fourtothebar"), or by first word ("pedal" is enough for
-/// "Pedal point"). Unknown names are an error, never a silent fallback.
+/// Match a CLI name against a set of style labels: exact, with punctuation
+/// collapsed ("fourtothebar", "riffpush"), or by first or last word ("pedal"
+/// is enough for "Pedal point", "push" for "Riff: push"). Unknown names are an
+/// error, never a silent fallback.
 fn match_style<T: Copy>(name: &str, all: &[T], label: fn(T) -> &'static str, kind: &str) -> T {
     let wanted = name.to_ascii_lowercase();
     let found = all.iter().copied().find(|&s| {
         let l = label(s).to_ascii_lowercase();
         l == wanted
-            || l.replace(['-', ' '], "") == wanted
+            || l.replace(['-', ' ', ':'], "") == wanted
             || l.split(' ').next() == Some(wanted.as_str())
+            || l.rsplit(' ').next() == Some(wanted.as_str())
     });
     match found {
         Some(s) => s,
@@ -151,7 +153,10 @@ fn main() -> std::io::Result<()> {
             "--soundfont" => sf_path = Some(val(&mut i)),
             // `-inst` suffixes so none of these collide with the `--no-*` part
             // toggles: a bare `--bass <name>` would swallow the progression id.
-            "--horn-inst" => settings.horn_inst = parse_instrument(&val(&mut i)),
+            "--horn-style" => {
+                settings.horn_style =
+                    match_style(&val(&mut i), &HornStyle::ALL, HornStyle::label, "horn style")
+            }
             "--comp-inst" => settings.comp_inst = parse_instrument(&val(&mut i)),
             "--bass-inst" => settings.bass_inst = parse_instrument(&val(&mut i)),
             "--bass-style" => {

@@ -100,21 +100,6 @@ impl Instrument {
 
     /// Instruments that suit a bass part.
     pub const BASS_CHOICES: [Instrument; 2] = [Instrument::Bass, Instrument::Trombone];
-
-    /// Instruments that suit a sustained horn section.
-    pub const HORN_CHOICES: [Instrument; 3] =
-        [Instrument::Sax, Instrument::Trumpet, Instrument::Trombone];
-
-    /// Octave shift (in semitones) this instrument takes when it plays the horn
-    /// section, so each horn sits in its natural register. Kept on the
-    /// instrument rather than in the arranger: adding a horn choice then cannot
-    /// silently land it in the wrong octave.
-    pub fn section_octave(self) -> i32 {
-        match self {
-            Instrument::Trombone => -12,
-            _ => 0,
-        }
-    }
 }
 
 /// A sounding note.

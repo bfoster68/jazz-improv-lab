@@ -121,6 +121,60 @@ impl CompStyle {
     }
 }
 
+/// What the three-piece horn section plays. The section is always trombone on
+/// the bottom, tenor sax in the middle and trumpet on top — these styles choose
+/// the figure. Backgrounds are *arranged* parts, so every style is
+/// deterministic: the same bar of the same form always plays the same figure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HornStyle {
+    /// Held section chords that phrase like players with lungs: two bars on,
+    /// two bars off, the second bar softer.
+    Pads,
+    /// A long chord on one, then the next change pushed on the and of four.
+    RiffPush,
+    /// Short stabs on the backbeats.
+    RiffBackbeat,
+    /// Silence for the soloist's call, then the section answers on beat three.
+    RiffCall,
+    /// Offbeat shout-chorus pushes on the ands of one and three.
+    RiffShout,
+}
+
+impl HornStyle {
+    pub const ALL: [HornStyle; 5] = [
+        HornStyle::Pads,
+        HornStyle::RiffPush,
+        HornStyle::RiffBackbeat,
+        HornStyle::RiffCall,
+        HornStyle::RiffShout,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            HornStyle::Pads => "Pads",
+            HornStyle::RiffPush => "Riff: push",
+            HornStyle::RiffBackbeat => "Riff: backbeat",
+            HornStyle::RiffCall => "Riff: call",
+            HornStyle::RiffShout => "Riff: shout",
+        }
+    }
+}
+
+/// Spread a voicing across the section: trombone takes the bottom note down an
+/// octave into its own register, the tenor sax the middle, the trumpet the top.
+fn section_voices(voicing: &[i32]) -> [(Instrument, i32); 3] {
+    let mut v = voicing.to_vec();
+    v.sort_unstable();
+    let bottom = v[0];
+    let middle = v[v.len() / 2];
+    let top = *v.last().unwrap();
+    [
+        (Instrument::Trombone, bottom - 12),
+        (Instrument::Sax, middle),
+        (Instrument::Trumpet, top),
+    ]
+}
+
 /// Eighth-note slots in a bar: 0 = beat 1, 1 = the "and", 2 = beat 2 …
 const SPARSE: &[&[usize]] = &[&[0], &[4], &[3], &[6], &[1], &[0, 4]];
 const MEDIUM: &[&[usize]] = &[
@@ -330,9 +384,9 @@ pub struct Settings {
     pub chords: bool,
     pub comp_inst: Instrument,
     pub comp_style: CompStyle,
-    /// A sustained horn-section pad over the changes.
+    /// The three-piece horn section: trombone, tenor sax, trumpet.
     pub horns: bool,
-    pub horn_inst: Instrument,
+    pub horn_style: HornStyle,
     pub drums: bool,
 }
 
@@ -350,7 +404,7 @@ impl Default for Settings {
             comp_inst: Instrument::Piano,
             comp_style: CompStyle::Rhythmic,
             horns: false,
-            horn_inst: Instrument::Sax,
+            horn_style: HornStyle::Pads,
             drums: true,
         }
     }
@@ -624,31 +678,53 @@ fn plan_bar_four(
         }
     }
 
-    // ---- horns (a sustained section pad over the changes) ----
+    // ---- horns: the three-piece section plays its arranged background ----
     if settings.horns {
-        let bar_dur = 4.0 * spb;
-        let octave = settings.horn_inst.section_octave();
-        // The horns roll their own dice, seeded per bar. Sharing the bar RNG
-        // would shift every later draw, so merely toggling the section would
-        // re-roll the walking bass and comping of the rest of the form — and an
-        // A/B render with and without `--horns` could never isolate the horns.
+        // The section rolls its own per-bar dice: toggling it never re-rolls
+        // the rest of the band, and the same bar always plays the same figure —
+        // backgrounds are arranged parts, not improvisations.
         let mut horn_rng = Rng::new(0x484F_524E ^ (index as u64).wrapping_mul(0x9E37_79B9));
-        let mut pad = |slot: &Slot, offset: f32, dur: f32, rng: &mut Rng| {
-            for &m in &comp_voicing(slot, rng) {
-                plan.notes.push(Event {
-                    offset,
-                    midi: m + octave,
-                    gain: 0.06,
-                    dur,
-                    instrument: settings.horn_inst,
-                });
+        let v = comp_voicing(&bar.chord_at(0), &mut horn_rng);
+        let v2 = if bar.is_split() {
+            comp_voicing(&bar.chord_at(2), &mut horn_rng)
+        } else {
+            v.clone()
+        };
+        let vnext = comp_voicing(&next.chord_at(0), &mut horn_rng);
+        let blow = |plan: &mut BarPlan, voicing: &[i32], offset: f32, dur: f32, gain: f32| {
+            for (instrument, midi) in section_voices(voicing) {
+                plan.notes.push(Event { offset, midi, gain, dur, instrument });
             }
         };
-        if bar.is_split() {
-            pad(&bar.chord_at(0), 0.0, 2.0 * spb, &mut horn_rng);
-            pad(&bar.chord_at(2), 2.0 * spb, 2.0 * spb, &mut horn_rng);
-        } else {
-            pad(&bar.chord_at(0), 0.0, bar_dur, &mut horn_rng);
+        match settings.horn_style {
+            HornStyle::Pads => match index % 4 {
+                // Two bars on, two bars off; the second breath leans back.
+                0 => {
+                    if bar.is_split() {
+                        blow(&mut plan, &v, 0.0, 1.9 * spb, 0.055);
+                        blow(&mut plan, &v2, 2.0 * spb, 1.8 * spb, 0.055);
+                    } else {
+                        blow(&mut plan, &v, 0.0, 3.8 * spb, 0.055);
+                    }
+                }
+                1 => blow(&mut plan, &v, 0.0, 3.8 * spb, 0.045),
+                _ => {}
+            },
+            HornStyle::RiffPush => {
+                blow(&mut plan, &v, 0.0, 1.6 * spb, 0.055);
+                blow(&mut plan, &vnext, 3.0 * spb + swing_off, 0.5 * spb, 0.05);
+            }
+            HornStyle::RiffBackbeat => {
+                blow(&mut plan, &v, spb, 0.4 * spb, 0.05);
+                blow(&mut plan, &v2, 3.0 * spb, 0.4 * spb, 0.05);
+            }
+            HornStyle::RiffCall => {
+                blow(&mut plan, &v2, 2.0 * spb, 1.8 * spb, 0.055);
+            }
+            HornStyle::RiffShout => {
+                blow(&mut plan, &v, swing_off, 0.4 * spb, 0.055);
+                blow(&mut plan, &v2, 2.0 * spb + swing_off, 0.4 * spb, 0.05);
+            }
         }
     }
 
@@ -816,18 +892,37 @@ fn plan_bar_three(
         }
     }
 
-    // ---- horns: a dotted-half pad ----
+    // ---- horns: the section's figures, sized for three beats ----
     if settings.horns {
-        let octave = settings.horn_inst.section_octave();
         let mut horn_rng = Rng::new(0x57_414C_545A ^ (index as u64).wrapping_mul(0x9E37_79B9));
-        for &m in &comp_voicing(&slot, &mut horn_rng) {
-            plan.notes.push(Event {
-                offset: 0.0,
-                midi: m + octave,
-                gain: 0.06,
-                dur: 3.0 * spb,
-                instrument: settings.horn_inst,
-            });
+        let v = comp_voicing(&slot, &mut horn_rng);
+        let vnext = comp_voicing(&next.chord_at(0), &mut horn_rng);
+        let blow = |plan: &mut BarPlan, voicing: &[i32], offset: f32, dur: f32, gain: f32| {
+            for (instrument, midi) in section_voices(voicing) {
+                plan.notes.push(Event { offset, midi, gain, dur, instrument });
+            }
+        };
+        match settings.horn_style {
+            HornStyle::Pads => match index % 4 {
+                0 => blow(&mut plan, &v, 0.0, 2.8 * spb, 0.055),
+                1 => blow(&mut plan, &v, 0.0, 2.8 * spb, 0.045),
+                _ => {}
+            },
+            HornStyle::RiffPush => {
+                blow(&mut plan, &v, 0.0, 1.4 * spb, 0.055);
+                blow(&mut plan, &vnext, 2.0 * spb + swing_off, 0.4 * spb, 0.05);
+            }
+            HornStyle::RiffBackbeat => {
+                blow(&mut plan, &v, spb, 0.4 * spb, 0.05);
+                blow(&mut plan, &v, 2.0 * spb, 0.4 * spb, 0.05);
+            }
+            HornStyle::RiffCall => {
+                blow(&mut plan, &v, spb, 1.6 * spb, 0.055);
+            }
+            HornStyle::RiffShout => {
+                blow(&mut plan, &v, swing_off, 0.4 * spb, 0.055);
+                blow(&mut plan, &v, spb + swing_off, 0.4 * spb, 0.05);
+            }
         }
     }
 
@@ -1396,11 +1491,15 @@ mod tests {
             let s = Settings { horns, ..Settings::default() };
             (0..16)
                 .flat_map(|i| plan_bar(&bars, i, &s, &mut rng).notes)
-                .filter(|e| e.instrument != Settings::default().horn_inst)
+                .filter(|e| !is_horn(e.instrument))
                 .map(|e| (e.midi, (e.offset * 1000.0) as i32))
                 .collect::<Vec<_>>()
         };
         assert_eq!(band(false), band(true), "enabling horns changed the bass/comping");
+    }
+
+    fn is_horn(i: Instrument) -> bool {
+        matches!(i, Instrument::Sax | Instrument::Trumpet | Instrument::Trombone)
     }
 
     #[test]
@@ -1412,17 +1511,110 @@ mod tests {
         for i in 0..16 {
             let plan = plan_bar(&bars, i, &off, &mut rng);
             assert!(
-                plan.notes.iter().all(|e| e.instrument != Instrument::Sax),
+                plan.notes.iter().all(|e| !is_horn(e.instrument)),
                 "horns sounded while disabled"
             );
         }
-        // Enabled: the chosen horn instrument appears.
-        let on = Settings { horns: true, horn_inst: Instrument::Trumpet, ..Settings::default() };
+        // Enabled: the section appears.
+        let on = Settings { horns: true, ..Settings::default() };
         let plan = plan_bar(&bars, 0, &on, &mut rng);
         assert!(
-            plan.notes.iter().any(|e| e.instrument == Instrument::Trumpet),
+            plan.notes.iter().any(|e| is_horn(e.instrument)),
             "horn section produced no notes"
         );
+    }
+
+    #[test]
+    fn the_horn_section_is_three_voices_low_to_high() {
+        let bars = progression::two_five_one(0);
+        let s = Settings {
+            horns: true,
+            bass: false,
+            chords: false,
+            drums: false,
+            ..Settings::default()
+        };
+        let mut rng = Rng::new(3);
+        let plan = plan_bar(&bars, 0, &s, &mut rng); // Pads: bar 0 blows
+        assert_eq!(plan.notes.len(), 3, "the section is exactly three horns: {:?}", plan.notes);
+        let by = |i: Instrument| plan.notes.iter().find(|e| e.instrument == i).map(|e| e.midi);
+        let bone = by(Instrument::Trombone).expect("no trombone chair");
+        let sax = by(Instrument::Sax).expect("no sax chair");
+        let tpt = by(Instrument::Trumpet).expect("no trumpet chair");
+        assert!(bone < sax && sax < tpt, "section stacked out of order: {bone} {sax} {tpt}");
+    }
+
+    #[test]
+    fn the_pads_breathe_two_bars_on_two_off() {
+        let bars = progression::blues(5);
+        let s = Settings {
+            horns: true,
+            bass: false,
+            chords: false,
+            drums: false,
+            ..Settings::default()
+        };
+        let mut rng = Rng::new(9);
+        for i in 0..16 {
+            let plan = plan_bar(&bars, i, &s, &mut rng);
+            assert_eq!(
+                !plan.notes.is_empty(),
+                i % 4 < 2,
+                "bar {i}: the pads must breathe - two bars on, two off"
+            );
+        }
+    }
+
+    #[test]
+    fn every_horn_style_stays_inside_the_bar_in_both_meters() {
+        let bars = progression::two_five_one(0);
+        for meter in [Meter::Four, Meter::Three] {
+            for style in HornStyle::ALL {
+                let s = Settings {
+                    meter,
+                    horns: true,
+                    horn_style: style,
+                    bass: false,
+                    chords: false,
+                    drums: false,
+                    ..Settings::default()
+                };
+                let mut rng = Rng::new(7);
+                let bar_len = s.bar_len();
+                let mut heard = false;
+                for i in 0..16 {
+                    let plan = plan_bar(&bars, i, &s, &mut rng);
+                    heard |= !plan.notes.is_empty();
+                    for e in &plan.notes {
+                        assert!(
+                            e.offset >= 0.0 && e.offset < bar_len,
+                            "{style:?} in {meter:?}: a horn left the bar"
+                        );
+                    }
+                }
+                assert!(heard, "{style:?} in {meter:?} never sounded");
+            }
+        }
+    }
+
+    #[test]
+    fn the_riffs_are_arranged_not_improvised() {
+        // Backgrounds are parts, not solos: the same bar of the same form must
+        // play the identical figure regardless of the band's own dice.
+        let bars = progression::modal_vamp(2);
+        let s = Settings {
+            horns: true,
+            horn_style: HornStyle::RiffPush,
+            bass: false,
+            chords: false,
+            drums: false,
+            ..Settings::default()
+        };
+        let mut r1 = Rng::new(1);
+        let mut r2 = Rng::new(999);
+        let a = plan_bar(&bars, 3, &s, &mut r1).notes;
+        let b = plan_bar(&bars, 3, &s, &mut r2).notes;
+        assert_eq!(a, b, "the section improvised");
     }
 
     #[test]

@@ -10,7 +10,7 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
 
-use jazz_audio::engine::{plan_bar, BassStyle, CompStyle, Density, Rng, Settings};
+use jazz_audio::engine::{plan_bar, BassStyle, CompStyle, Density, HornStyle, Rng, Settings};
 use jazz_audio::stream::{AudioCore, AudioHandle};
 use jazz_theory::drill::{self, DRILL_IDS};
 use jazz_theory::harmony::{render_scale, find_scale, SCALES};
@@ -88,11 +88,6 @@ struct EarState {
 }
 
 const SAMPLE_RATE: f32 = 44_100.0;
-
-/// The horn section is being reworked; its mixer row and jam presets are
-/// parked behind this flag. Flip it to bring the horns back — the engine
-/// support and its tests are all still in place.
-const HORNS_ENABLED: bool = false;
 
 fn main() {
     #[cfg(target_arch = "wasm32")]
@@ -427,12 +422,18 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
                 }
             });
     });
-    if HORNS_ENABLED {
-        ui.horizontal(|ui| {
-            dirty |= ui.checkbox(&mut state.settings.horns, "Horns").changed();
-            dirty |= instrument_combo(ui, "horn_inst", &mut state.settings.horn_inst, &Instrument::HORN_CHOICES);
-        });
-    }
+    ui.horizontal(|ui| {
+        dirty |= ui.checkbox(&mut state.settings.horns, "Horns").changed();
+        ui.label("  ");
+        egui::ComboBox::from_id_salt("horn_style")
+            .selected_text(state.settings.horn_style.label())
+            .show_ui(ui, |ui| {
+                for s in HornStyle::ALL {
+                    dirty |= ui.selectable_value(&mut state.settings.horn_style, s, s.label()).changed();
+                }
+            });
+        ui.label(egui::RichText::new("  trombone \u{00B7} sax \u{00B7} trumpet").weak().size(12.0));
+    });
     ui.horizontal(|ui| {
         dirty |= ui.checkbox(&mut state.settings.drums, "Drums").changed();
     });
@@ -914,8 +915,8 @@ fn standards_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
         ui.label(
             egui::RichText::new(
                 "Learn the melody and the changes, then improvise. \"Comp me\" starts a \
-                 sparse trio behind your solo; \"Full band\" brings the busier rhythm \
-                 section. Both load the tune into Play-Along at its own tempo and feel.",
+                 sparse trio behind your solo; \"Full band\" adds the horn section. Both \
+                 load the tune into Play-Along at its own tempo and feel.",
             )
             .weak(),
         );
@@ -970,10 +971,9 @@ fn start_jam(state: &mut AppState, audio: &Audio, st: &Standard, full_band: bool
     state.settings.bass = true;
     state.settings.chords = true;
     state.settings.drums = true;
-    // While the horn section is being reworked, "Full band" means the busier
-    // rhythm section rather than added horns.
-    state.settings.horns = full_band && HORNS_ENABLED;
-    state.settings.density = if full_band { Density::Busy } else { Density::Sparse };
+    state.settings.horns = full_band;
+    state.settings.horn_style = HornStyle::Pads;
+    state.settings.density = if full_band { Density::Medium } else { Density::Sparse };
     load_progression(state, audio, i, true);
     state.tab = Tab::PlayAlong;
 }
