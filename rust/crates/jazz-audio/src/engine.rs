@@ -365,6 +365,11 @@ pub struct BarPlan {
     pub two_feel: bool,
 }
 
+/// The default swing ratio: a triplet feel. 0.5 is straight eighths.
+pub const SWING_RATIO: f32 = 2.0 / 3.0;
+/// The default density of the experimental idea generator's lines.
+pub const IDEAS_BUSYNESS: f32 = 0.78;
+
 /// Settings for the rhythm section.
 ///
 /// Each pitched part carries its own instrument so the play-along can be mixed
@@ -377,6 +382,8 @@ pub struct Settings {
     /// the tune the way its key does.
     pub meter: Meter,
     pub swing: bool,
+    /// Where the swung eighth lands inside the beat: 0.5 straight, 2/3 triplet.
+    pub swing_ratio: f32,
     pub density: Density,
     pub bass: bool,
     pub bass_inst: Instrument,
@@ -391,6 +398,8 @@ pub struct Settings {
     /// EXPERIMENTAL: the computer takes a chorus. See [`crate::solo`].
     pub solo: bool,
     pub solo_inst: Instrument,
+    /// How dense the idea generator's lines are (chance a grid slot sounds).
+    pub solo_density: f32,
 }
 
 impl Default for Settings {
@@ -399,6 +408,7 @@ impl Default for Settings {
             tempo: 120.0,
             meter: Meter::Four,
             swing: true,
+            swing_ratio: SWING_RATIO,
             density: Density::Medium,
             bass: true,
             bass_inst: Instrument::Bass,
@@ -411,6 +421,7 @@ impl Default for Settings {
             drums: true,
             solo: false,
             solo_inst: Instrument::Sax,
+            solo_density: IDEAS_BUSYNESS,
         }
     }
 }
@@ -453,7 +464,7 @@ fn plan_bar_four(
     let next = bars[(index + 1) % bars.len()];
     let next_root = next.chord_at(0).root;
     let spb = 60.0 / settings.tempo.max(20.0);
-    let swing_off = if settings.swing { spb * 2.0 / 3.0 } else { spb * 0.5 };
+    let swing_off = spb * if settings.swing { settings.swing_ratio } else { 0.5 };
     let last_of_form = index % bars.len() == bars.len() - 1;
 
     // The occasional drop into two belongs to the walking style; a selected
@@ -789,7 +800,7 @@ fn plan_bar_three(
     let next = bars[(index + 1) % bars.len()];
     let next_root = next.chord_at(0).root;
     let spb = 60.0 / settings.tempo.max(20.0);
-    let swing_off = if settings.swing { spb * 2.0 / 3.0 } else { spb * 0.5 };
+    let swing_off = spb * if settings.swing { settings.swing_ratio } else { 0.5 };
     let last_of_form = index % bars.len() == bars.len() - 1;
     let slot = bar.chord_at(0);
 
@@ -1308,6 +1319,30 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn the_swing_ratio_is_a_real_dial() {
+        // The Charleston's push sits on the and of two, wherever the swing
+        // ratio puts it.
+        let bars = progression::two_five_one(0);
+        for ratio in [0.5_f32, 0.7] {
+            let s = Settings {
+                comp_style: CompStyle::Charleston,
+                swing_ratio: ratio,
+                bass: false,
+                drums: false,
+                ..Settings::default()
+            };
+            let mut rng = Rng::new(3);
+            let spb = 60.0 / s.tempo;
+            let plan = plan_bar(&bars, 0, &s, &mut rng);
+            let push = plan.notes.iter().map(|e| e.offset).fold(0.0_f32, f32::max);
+            assert!(
+                (push - (spb + spb * ratio)).abs() < 1e-4,
+                "ratio {ratio}: push landed at {push}"
+            );
         }
     }
 

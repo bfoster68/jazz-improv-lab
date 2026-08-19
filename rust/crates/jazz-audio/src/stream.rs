@@ -47,6 +47,8 @@ pub enum Command {
     /// re-queue upcoming bars after a live mix change.
     ClearPending { from: f32 },
     SetVolume(f32),
+    /// Retune the room live: (size, damping, wet).
+    SetReverb { room: f32, damp: f32, wet: f32 },
 }
 
 /// The UI-side handle. Cheap to clone, never blocks.
@@ -108,6 +110,11 @@ impl AudioHandle {
 
     pub fn set_volume(&self, v: f32) {
         self.send(Command::SetVolume(v));
+    }
+
+    /// Retune the room the band sits in; applies within one callback.
+    pub fn set_reverb(&self, room: f32, damp: f32, wet: f32) {
+        self.send(Command::SetReverb { room, damp, wet });
     }
 
     pub fn sample_rate(&self) -> f32 {
@@ -230,6 +237,9 @@ impl AudioCore {
                     }
                 }
                 Ok(Command::SetVolume(v)) => self.mixer.volume = v.clamp(0.0, 1.5),
+                Ok(Command::SetReverb { room, damp, wet }) => {
+                    self.reverb.set_params(room, damp, wet)
+                }
                 Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
             }
         }

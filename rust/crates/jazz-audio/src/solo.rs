@@ -71,7 +71,7 @@ pub fn solo_bar(bars: &[Bar], index: usize, settings: &Settings) -> Vec<Event> {
     let beats = settings.meter.beats();
     let slots = beats * 2; // eighth-note grid
     let spb = 60.0 / settings.tempo.max(20.0);
-    let swing_off = if settings.swing { spb * 2.0 / 3.0 } else { spb * 0.5 };
+    let swing_off = spb * if settings.swing { settings.swing_ratio } else { 0.5 };
     let mut rng = Rng::new(0x50F0_CAFE ^ (index as u64).wrapping_mul(0x9E37_79B9));
     let inst = settings.solo_inst;
     let (lo, hi) = range_of(inst);
@@ -111,7 +111,7 @@ pub fn solo_bar(bars: &[Bar], index: usize, settings: &Settings) -> Vec<Event> {
                 }
                 break;
             }
-            if !rng.chance(0.78) {
+            if !rng.chance(settings.solo_density) {
                 continue; // space inside the line
             }
             let toward = (goal - cur).signum();
@@ -222,6 +222,19 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn busyness_is_a_real_dial() {
+        let bars = progression::blues(5);
+        let count = |density: f32| -> usize {
+            let s = Settings { solo_density: density, ..solo_settings() };
+            (0..16).map(|i| solo_bar(&bars, i, &s).len()).sum()
+        };
+        assert!(
+            count(0.45) < count(0.95),
+            "turning busyness up must add notes"
+        );
     }
 
     #[test]

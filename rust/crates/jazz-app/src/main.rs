@@ -10,7 +10,10 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
 
-use jazz_audio::engine::{plan_bar, BassStyle, CompStyle, Density, HornStyle, Rng, Settings};
+use jazz_audio::engine::{
+    self, plan_bar, BassStyle, CompStyle, Density, HornStyle, Rng, Settings,
+};
+use jazz_audio::reverb::Reverb;
 use jazz_audio::stream::{AudioCore, AudioHandle};
 use jazz_theory::drill::{self, DRILL_IDS};
 use jazz_theory::harmony::{render_scale, find_scale, SCALES};
@@ -60,6 +63,10 @@ struct AppState {
     audio_engine: Option<String>,
     /// Whether the experimental solo-sheet window is open.
     show_sheet: bool,
+    /// The room's live parameters, mirrored here for the Settings tab.
+    reverb_wet: f32,
+    reverb_room: f32,
+    reverb_damp: f32,
     /// Audio-clock time (seconds) at which the current transport started. The
     /// mixer clock free-runs and is never reset, so bars must be scheduled
     /// relative to this epoch rather than to absolute zero — otherwise a restart
@@ -77,6 +84,7 @@ enum Tab {
     Ear,
     Masters,
     Standards,
+    Settings,
 }
 
 #[derive(Default)]
@@ -138,6 +146,9 @@ fn main() {
             selected_master: None,
             audio_engine: None,
             show_sheet: false,
+            reverb_wet: Reverb::DEFAULT_WET,
+            reverb_room: Reverb::DEFAULT_ROOM,
+            reverb_damp: Reverb::DEFAULT_DAMP,
             epoch: 0.0,
             sched_rng: Rng::new(0xC0FFEE),
         })
@@ -293,6 +304,7 @@ fn ui(mut contexts: EguiContexts, mut state: ResMut<AppState>, audio: Res<Audio>
             ui.selectable_value(&mut state.tab, Tab::Ear, "Ear Training");
             ui.selectable_value(&mut state.tab, Tab::Masters, "Masters");
             ui.selectable_value(&mut state.tab, Tab::Standards, "Standards");
+            ui.selectable_value(&mut state.tab, Tab::Settings, "Settings");
         });
     });
 
@@ -303,6 +315,7 @@ fn ui(mut contexts: EguiContexts, mut state: ResMut<AppState>, audio: Res<Audio>
         Tab::Ear => ear_ui(ui, &mut state, &audio),
         Tab::Masters => masters_ui(ui, &mut state),
         Tab::Standards => standards_ui(ui, &mut state, &audio),
+        Tab::Settings => settings_ui(ui, &mut state, &audio),
     });
 
     // The experimental solo sheet floats in its own window so it can sit
@@ -315,6 +328,132 @@ fn ui(mut contexts: EguiContexts, mut state: ResMut<AppState>, audio: Res<Audio>
             .show(&ctx, |ui| solo_sheet_ui(ui, &state));
         state.show_sheet = open;
     }
+}
+
+/// One tunable row: label, slider, a reset button, and the default beside a
+/// plain-language hint. Returns whether the value changed (reset included; a
+/// reset at the default reports no change).
+fn tunable(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut f32,
+    range: std::ops::RangeInclusive<f32>,
+    default: f32,
+    hint: &str,
+) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.add_sized([70.0, 18.0], egui::Label::new(label));
+        changed |= ui
+            .add(egui::Slider::new(value, range).fixed_decimals(2))
+            .changed();
+        if ui.small_button("reset").clicked() && *value != default {
+            *value = default;
+            changed = true;
+        }
+        ui.label(
+            egui::RichText::new(format!("default {default:.2} \u{00B7} {hint}"))
+                .weak()
+                .size(12.0),
+        );
+    });
+    changed
+}
+
+/// The Settings tab: every tunable feature, grouped by what the listener
+/// hears, each knob carrying its default and a reset.
+fn settings_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
+    let gold = egui::Color32::from_rgb(224, 166, 60);
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        ui.heading("Settings");
+        ui.label(
+            egui::RichText::new(
+                "Tune the band to taste. Room changes are instant; feel and idea \
+                 changes take effect from the next bar.",
+            )
+            .weak(),
+        );
+        ui.add_space(10.0);
+
+        // ---- the room: live DSP, applied instantly ----
+        let mut room_changed = false;
+        ui.group(|ui| {
+            ui.label(egui::RichText::new("The room").strong().color(gold));
+            ui.label(
+                egui::RichText::new("The reverb the whole band sits in. Applies instantly.")
+                    .weak()
+                    .size(12.0),
+            );
+            ui.add_space(4.0);
+            room_changed |= tunable(
+                ui, "Wet", &mut state.reverb_wet, 0.0..=0.6,
+                Reverb::DEFAULT_WET, "how much room is mixed in",
+            );
+            room_changed |= tunable(
+                ui, "Size", &mut state.reverb_room, 0.70..=0.97,
+                Reverb::DEFAULT_ROOM, "tail length - club to hall",
+            );
+            room_changed |= tunable(
+                ui, "Damping", &mut state.reverb_damp, 0.0..=0.9,
+                Reverb::DEFAULT_DAMP, "how fast the highs die away",
+            );
+        });
+        if room_changed {
+            audio.0.set_reverb(state.reverb_room, state.reverb_damp, state.reverb_wet);
+        }
+        ui.add_space(8.0);
+
+        // ---- the feel: re-times future bars ----
+        let mut band_changed = false;
+        ui.group(|ui| {
+            ui.label(egui::RichText::new("The feel").strong().color(gold));
+            ui.label(
+                egui::RichText::new(
+                    "Where the swung eighth lands. Applies from the next bar, when \
+                     Swing is on.",
+                )
+                .weak()
+                .size(12.0),
+            );
+            ui.add_space(4.0);
+            band_changed |= tunable(
+                ui, "Swing", &mut state.settings.swing_ratio, 0.50..=0.75,
+                engine::SWING_RATIO, "0.50 straight - 0.67 triplet - 0.75 hard",
+            );
+        });
+        ui.add_space(8.0);
+
+        // ---- the ideas: the experimental generator ----
+        ui.group(|ui| {
+            ui.label(egui::RichText::new("The ideas (experimental)").strong().color(gold));
+            ui.label(
+                egui::RichText::new(
+                    "The phrase generator on the Play-Along tab. Applies from the next bar.",
+                )
+                .weak()
+                .size(12.0),
+            );
+            ui.add_space(4.0);
+            band_changed |= tunable(
+                ui, "Busyness", &mut state.settings.solo_density, 0.40..=0.95,
+                engine::IDEAS_BUSYNESS, "how dense the phrases are",
+            );
+        });
+        if band_changed {
+            resync(state, audio);
+        }
+        ui.add_space(12.0);
+
+        if ui.button("Reset all to defaults").clicked() {
+            state.reverb_wet = Reverb::DEFAULT_WET;
+            state.reverb_room = Reverb::DEFAULT_ROOM;
+            state.reverb_damp = Reverb::DEFAULT_DAMP;
+            state.settings.swing_ratio = engine::SWING_RATIO;
+            state.settings.solo_density = engine::IDEAS_BUSYNESS;
+            audio.0.set_reverb(state.reverb_room, state.reverb_damp, state.reverb_wet);
+            resync(state, audio);
+        }
+    });
 }
 
 /// Map a MIDI note to (diatonic staff step, accidental) under a spelling.

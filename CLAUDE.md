@@ -74,7 +74,7 @@ tests-web/                Playwright suites for the browser app
 ```bash
 # Rust
 cd rust
-cargo test -p jazz-theory -p jazz-audio   # 174 tests, ~2s, no audio device needed
+cargo test -p jazz-theory -p jazz-audio   # 177 tests, ~2s, no audio device needed
 cargo test -p jazz-audio --features soundfont   # includes the SoundFont paths
 cargo check --workspace                  # includes the Bevy app
 cargo run -p jazz-audio --bin render-wav -- --list
@@ -126,7 +126,7 @@ cd docs && node build-docx.js
 
 ## Where things stand
 
-Last verified state: **174 tests pass** (95 theory + 79 audio), `cargo check
+Last verified state: **177 tests pass** (95 theory + 82 audio), `cargo check
 --workspace` is clean with no warnings, and `jazz-app` builds, links, and has
 been run and heard on real hardware.
 
@@ -191,6 +191,14 @@ layers); the idle guard owes a 3 s tail after the sources stop so the room is
 never chopped; Clear empties the room (Stop means silence). Tuning knobs in
 `Reverb::new`: room 0.92 (~2.5-3 s tail), damp 0.35, wet 0.28. render-wav
 always renders stereo through the real AudioCore path.
+
+The Settings tab holds the tunables, grouped by what the listener hears, each
+knob showing its default with a per-row reset and a reset-all: The room
+(reverb wet/size/damping — live via Command::SetReverb, clamped in
+Reverb::set_params), The feel (Settings::swing_ratio, 0.5 straight to 0.75
+hard; default engine::SWING_RATIO = 2/3), and The ideas (Settings::solo_density,
+default engine::IDEAS_BUSYNESS = 0.78). Room changes are instant; feel/idea
+changes resync from the next bar. Dial tests pin each knob's audible effect.
 
 Masters and Standards are separate tabs. Each `Master` carries a biography —
 born/died (died empty for the living: Severinsen, Sandoval), a `bio`

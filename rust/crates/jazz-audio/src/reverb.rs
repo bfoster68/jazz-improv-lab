@@ -81,16 +81,21 @@ pub struct Reverb {
 }
 
 impl Reverb {
-    /// A medium jazz-club room. The three numbers worth tuning by ear:
-    /// `room` (comb feedback, tail length), `damp` (high-frequency absorption)
-    /// and `wet` (how much room is mixed in).
+    /// Comb feedback on Freeverb's scale (it maps room size upward: raw 0.84
+    /// would decay in a blink). 0.92 gives roughly a 2.5-3 s tail — a club,
+    /// not a cathedral — inside the engine's 3 s tail budget.
+    pub const DEFAULT_ROOM: f32 = 0.92;
+    /// High-frequency absorption in the feedback loop.
+    pub const DEFAULT_DAMP: f32 = 0.35;
+    /// How much room is mixed on top of the dry band.
+    pub const DEFAULT_WET: f32 = 0.28;
+
+    /// A medium jazz-club room. The three numbers worth tuning by ear live in
+    /// the `DEFAULT_*` consts and on the Settings tab.
     pub fn new(sample_rate: f32) -> Self {
-        // Comb feedback on Freeverb's scale (it maps room size upward: raw
-        // 0.84 would decay in a blink). 0.92 gives roughly a 2.5-3 s tail —
-        // a club, not a cathedral — inside the engine's 3 s tail budget.
-        let room = 0.92;
-        let damp = 0.35;
-        let wet = 0.28;
+        let room = Self::DEFAULT_ROOM;
+        let damp = Self::DEFAULT_DAMP;
+        let wet = Self::DEFAULT_WET;
         let scale = (sample_rate / 44_100.0).max(0.1);
         let sized = |n: usize| ((n as f32 * scale) as usize).max(1);
         Self {
@@ -129,6 +134,20 @@ impl Reverb {
             r = a.process(r);
         }
         (l * self.wet, r * self.wet)
+    }
+
+    /// Retune the room live: comb feedback (size), damping and wet level are
+    /// plain scalars, so this touches no buffers — allocation-free and safe to
+    /// call from the callback's command drain. Inputs are clamped hard: comb
+    /// feedback at or above 1.0 is a self-oscillating room.
+    pub fn set_params(&mut self, room: f32, damp: f32, wet: f32) {
+        let room = room.clamp(0.70, 0.97);
+        let damp = damp.clamp(0.0, 0.95);
+        self.wet = wet.clamp(0.0, 1.0);
+        for c in self.combs_l.iter_mut().chain(self.combs_r.iter_mut()) {
+            c.feedback = room;
+            c.damp = damp;
+        }
     }
 
     /// Hard stop: empty the room. Cheap enough for the callback — it is a
@@ -187,6 +206,36 @@ mod tests {
             }
         }
         assert!(differ > 10_000, "left and right barely decorrelate: {differ}");
+    }
+
+    #[test]
+    fn set_params_takes_effect_and_clamps() {
+        // Wet zero silences the room entirely.
+        let mut dry = Reverb::new(44_100.0);
+        dry.set_params(Reverb::DEFAULT_ROOM, Reverb::DEFAULT_DAMP, 0.0);
+        let mut heard = 0.0_f32;
+        for i in 0..8_192 {
+            let (l, r) = dry.process(if i == 0 { 1.0 } else { 0.0 });
+            heard = heard.max(l.abs()).max(r.abs());
+        }
+        assert_eq!(heard, 0.0, "wet zero still leaked room");
+
+        // An absurd room size is clamped: the tail must still decay, never
+        // self-oscillate.
+        let mut wild = Reverb::new(44_100.0);
+        wild.set_params(2.0, 0.0, 1.0);
+        let mut early = 0.0_f32;
+        let mut late = 0.0_f32;
+        for i in 0..(44_100 * 6) {
+            let (l, _) = wild.process(if i == 0 { 1.0 } else { 0.0 });
+            if i < 44_100 {
+                early = early.max(l.abs());
+            } else if i >= 44_100 * 5 {
+                late = late.max(l.abs());
+            }
+        }
+        assert!(late < early, "the clamp failed: the room is running away");
+        assert!(late.is_finite());
     }
 
     #[test]
