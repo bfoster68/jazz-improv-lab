@@ -74,7 +74,7 @@ tests-web/                Playwright suites for the browser app
 ```bash
 # Rust
 cd rust
-cargo test -p jazz-theory -p jazz-audio   # 167 tests, ~2s, no audio device needed
+cargo test -p jazz-theory -p jazz-audio   # 174 tests, ~2s, no audio device needed
 cargo test -p jazz-audio --features soundfont   # includes the SoundFont paths
 cargo check --workspace                  # includes the Bevy app
 cargo run -p jazz-audio --bin render-wav -- --list
@@ -126,7 +126,7 @@ cd docs && node build-docx.js
 
 ## Where things stand
 
-Last verified state: **167 tests pass** (95 theory + 72 audio), `cargo check
+Last verified state: **174 tests pass** (95 theory + 79 audio), `cargo check
 --workspace` is clean with no warnings, and `jazz-app` builds, links, and has
 been run and heard on real hardware.
 
@@ -182,6 +182,15 @@ opens a window that redraws exactly those notes as simplified notation
 (treble staff, real spelling per the bar's chord, proportional rhythm) via
 `solo_sheet_ui`/`staff_step` in main.rs. May or may not become permanent —
 everything lives in solo.rs + one hook per meter + the sheet fns.
+
+The band sits in a room: `reverb.rs` is a hand-rolled Freeverb (8 damped
+combs + 4 allpasses per channel, right channel spread 23 samples) applied to
+the whole post-volume mix in `AudioCore::fill`. Stereo runs end-to-end (the
+SoundFont's image is never folded to mono — that phase-cancels its chorused
+layers); the idle guard owes a 3 s tail after the sources stop so the room is
+never chopped; Clear empties the room (Stop means silence). Tuning knobs in
+`Reverb::new`: room 0.92 (~2.5-3 s tail), damp 0.35, wet 0.28. render-wav
+always renders stereo through the real AudioCore path.
 
 Masters and Standards are separate tabs. Each `Master` carries a biography —
 born/died (died empty for the living: Severinsen, Sandoval), a `bio`
@@ -248,7 +257,6 @@ Every `try_it` is guaranteed to resolve; a test enforces it.
 - Both builds can use real samples: the web app streams FluidR3 from a CDN, the
   Rust app loads any GM `.sf2` from `crates/jazz-app/assets/soundfont.sf2` via
   `rustysynth` (feature `soundfont`). Neither bundles one.
-- Rust has no reverb yet; the browser build has a convolution reverb.
 - Bevy is built with `default-features = false`. Adding a feature back is fine, but
   check the crate count and wasm size first — the defaults pull in glTF, gamepads,
   Bevy's own audio stack and every image codec, none of which this app uses.

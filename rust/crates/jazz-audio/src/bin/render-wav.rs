@@ -34,8 +34,8 @@ fn match_style<T: Copy>(name: &str, all: &[T], label: fn(T) -> &'static str, kin
         }
     }
 }
+use jazz_audio::stream;
 use jazz_audio::voice::Instrument;
-use jazz_audio::Mixer;
 use jazz_theory::progression;
 
 /// Map a name on the command line to an instrument. The canonical names come
@@ -56,62 +56,6 @@ fn parse_instrument(name: &str) -> Instrument {
             std::process::exit(2);
         }
     }
-}
-
-/// Render a form through the SoundFont by driving the *real* playback path —
-/// the same [`AudioCore`] the app's audio callback owns — so this WAV is exactly
-/// what the app plays, and a change to the live mix can never silently diverge
-/// from the offline audition.
-#[cfg(feature = "soundfont")]
-fn render_with_soundfont(
-    path: &str,
-    bars: &[progression::Bar],
-    settings: &Settings,
-    seed: u64,
-    total_bars: usize,
-    bar_len: f32,
-    sr: f32,
-    tail: f32,
-) -> Vec<f32> {
-    use jazz_audio::soundfont::SoundfontVoices;
-    use jazz_audio::stream::AudioCore;
-
-    let sf = match SoundfontVoices::load(path, sr) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("could not load soundfont '{path}': {e}");
-            std::process::exit(2);
-        }
-    };
-    let (handle, mut core) = AudioCore::new(sr);
-    core.set_soundfont(Some(sf));
-    handle.set_playing(true);
-    let mut rng = Rng::new(seed);
-    for i in 0..total_bars {
-        handle.schedule(plan_bar(bars, i, settings, &mut rng), i as f32 * bar_len);
-    }
-    // Stereo, through the same fill() the live callback uses, so the WAV
-    // carries the SoundFont's real image (chorus, reverb, panning).
-    let mut out = vec![0.0f32; (tail * sr) as usize * 2];
-    for chunk in out.chunks_mut(1024) {
-        core.fill(chunk, 2);
-    }
-    out
-}
-
-#[cfg(not(feature = "soundfont"))]
-fn render_with_soundfont(
-    _path: &str,
-    _bars: &[progression::Bar],
-    _settings: &Settings,
-    _seed: u64,
-    _total_bars: usize,
-    _bar_len: f32,
-    _sr: f32,
-    _tail: f32,
-) -> Vec<f32> {
-    eprintln!("--soundfont requires building with --features soundfont");
-    std::process::exit(2);
 }
 
 fn main() -> std::io::Result<()> {
@@ -195,21 +139,39 @@ fn main() -> std::io::Result<()> {
     let total_bars = prog.bars.len() * choruses;
     let tail = total_bars as f32 * bar_len + 2.0;
 
-    let samples = match &sf_path {
-        Some(path) => render_with_soundfont(path, &prog.bars, &settings, seed, total_bars, bar_len, SR, tail),
-        None => {
-            let mut mixer = Mixer::new(SR);
-            let mut rng = Rng::new(seed);
-            for i in 0..total_bars {
-                let plan = plan_bar(&prog.bars, i, &settings, &mut rng);
-                mixer.schedule(&plan, i as f32 * bar_len);
+    // Every render drives the real playback path — the same AudioCore the
+    // app's callback owns — so the WAV carries exactly what the app plays:
+    // the SoundFont's stereo image and the master room reverb included.
+    let samples = {
+        let (handle, mut core) = stream::AudioCore::new(SR);
+        #[cfg(feature = "soundfont")]
+        if let Some(path) = &sf_path {
+            match jazz_audio::soundfont::SoundfontVoices::load(path, SR) {
+                Ok(sf) => core.set_soundfont(Some(sf)),
+                Err(e) => {
+                    eprintln!("could not load soundfont '{path}': {e}");
+                    std::process::exit(2);
+                }
             }
-            mixer.render(tail)
         }
+        #[cfg(not(feature = "soundfont"))]
+        if sf_path.is_some() {
+            eprintln!("--soundfont requires building with --features soundfont");
+            std::process::exit(2);
+        }
+        handle.set_playing(true);
+        let mut rng = Rng::new(seed);
+        for i in 0..total_bars {
+            handle.schedule(plan_bar(&prog.bars, i, &settings, &mut rng), i as f32 * bar_len);
+        }
+        let mut out = vec![0.0f32; (tail * SR) as usize * 2];
+        for chunk in out.chunks_mut(1024) {
+            core.fill(chunk, 2);
+        }
+        out
     };
 
-    let channels: u16 = if sf_path.is_some() { 2 } else { 1 };
-    write_wav(&out, &samples, SR as u32, channels)?;
+    write_wav(&out, &samples, SR as u32, 2)?;
 
     let peak = samples.iter().fold(0.0f32, |a, b| a.max(b.abs()));
     println!(
@@ -219,7 +181,7 @@ fn main() -> std::io::Result<()> {
         choruses,
         settings.tempo,
         if settings.swing { " swung" } else { " straight" },
-        samples.len() as f32 / SR / channels as f32,
+        samples.len() as f32 / SR / 2.0,
         peak,
         out
     );

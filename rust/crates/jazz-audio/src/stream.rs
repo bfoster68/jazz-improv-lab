@@ -122,6 +122,11 @@ pub struct AudioCore {
     playhead: Arc<AtomicU32>,
     playing: Arc<AtomicBool>,
     sample_rate: Arc<AtomicU32>,
+    /// The master send reverb — the room the whole band sits in.
+    reverb: crate::reverb::Reverb,
+    /// Frames of reverb tail still owed after the sources go quiet, so the
+    /// idle fast-path cannot chop the room off mid-ring.
+    tail_frames: u32,
     #[cfg(feature = "soundfont")]
     sf: Option<crate::soundfont::SoundfontVoices>,
 }
@@ -147,6 +152,8 @@ impl AudioCore {
                 playhead,
                 playing,
                 sample_rate: rate,
+                reverb: crate::reverb::Reverb::new(sample_rate),
+                tail_frames: 0,
                 #[cfg(feature = "soundfont")]
                 sf: None,
             },
@@ -155,9 +162,13 @@ impl AudioCore {
 
     /// Adopt the output device's actual sample rate, so playback is not transposed
     /// when the device runs at 48 kHz rather than 44.1.
+    ///
+    /// Called before the stream opens, never from the callback — rebuilding the
+    /// reverb's delay lines allocates.
     pub fn set_sample_rate(&mut self, rate: f32) {
         self.sample_rate.store(rate as u32, Ordering::Relaxed);
         self.mixer.set_sample_rate(rate);
+        self.reverb = crate::reverb::Reverb::new(rate);
     }
 
     /// Route pitched notes through a SoundFont instead of the built-in synthesis.
@@ -202,6 +213,10 @@ impl AudioCore {
                 }
                 Ok(Command::Clear) => {
                     self.mixer.clear();
+                    // A hard stop empties the room too — Stop means silence,
+                    // and the test that says so is right.
+                    self.reverb.mute();
+                    self.tail_frames = 0;
                     #[cfg(feature = "soundfont")]
                     if let Some(sf) = self.sf.as_mut() {
                         sf.all_off();
@@ -225,19 +240,22 @@ impl AudioCore {
     pub fn fill(&mut self, out: &mut [f32], channels: usize) {
         self.drain();
 
-        // Only take the pure-silence fast path when nothing is sounding *and*
-        // nothing is waiting to sound. A one-off preview (note/chord) lands in
-        // `pending` and is only promoted to an active voice inside `tick`, so a
-        // guard that looked at `active_count()` alone silently swallowed every
-        // preview fired while the transport was stopped. The SoundFont check is
-        // `is_active`, not just queued events — released sample voices are still
-        // decaying after their note-off, and zeroing the buffer then would chop
-        // every preview's tail with an audible click.
-        let idle =
-            !self.playing.load(Ordering::Relaxed) && self.mixer.active_count() == 0 && !self.mixer.has_pending();
+        // Only take the pure-silence fast path when nothing is sounding,
+        // nothing is waiting to sound, *and* the room has finished ringing. A
+        // one-off preview (note/chord) lands in `pending` and is only promoted
+        // to an active voice inside `tick`, so a guard that looked at
+        // `active_count()` alone silently swallowed every preview fired while
+        // the transport was stopped. The SoundFont check is `is_active`, not
+        // just queued events — released sample voices are still decaying after
+        // their note-off. And the reverb tail outlives all of them, so the
+        // sources going quiet starts a countdown instead of an instant cut.
+        let sources_quiet = !self.playing.load(Ordering::Relaxed)
+            && self.mixer.active_count() == 0
+            && !self.mixer.has_pending();
         #[cfg(feature = "soundfont")]
-        let idle = idle && self.sf.as_ref().map_or(true, |sf| !sf.is_active());
-        if idle {
+        let sources_quiet =
+            sources_quiet && self.sf.as_ref().map_or(true, |sf| !sf.is_active());
+        if sources_quiet && self.tail_frames == 0 {
             out.fill(0.0);
             return;
         }
@@ -266,26 +284,29 @@ impl AudioCore {
             // blocks are raw, so scale them here too — otherwise the volume
             // slider would control only the drums whenever a soundfont is loaded.
             let s = self.mixer.tick();
-            match (&sf_blocks, frame.len()) {
-                (Some((lb, rb)), 1) => {
-                    // A mono device gets the unavoidable fold-down.
-                    let m = (lb.get(i).unwrap_or(&0.0) + rb.get(i).unwrap_or(&0.0)) * 0.5;
-                    frame[0] = crate::soft_clip(s + m * self.mixer.volume);
-                }
-                (Some((lb, rb)), _) => {
-                    let l = crate::soft_clip(s + lb.get(i).unwrap_or(&0.0) * self.mixer.volume);
-                    let r = crate::soft_clip(s + rb.get(i).unwrap_or(&0.0) * self.mixer.volume);
-                    frame[0] = l;
-                    for o in frame[1..].iter_mut() {
-                        *o = r;
-                    }
-                }
-                (None, _) => {
-                    for o in frame.iter_mut() {
-                        *o = s;
-                    }
+            let (mut dry_l, mut dry_r) = (s, s);
+            if let Some((lb, rb)) = &sf_blocks {
+                dry_l += lb.get(i).unwrap_or(&0.0) * self.mixer.volume;
+                dry_r += rb.get(i).unwrap_or(&0.0) * self.mixer.volume;
+            }
+            // The whole (post-volume) mix takes the same room.
+            let (wet_l, wet_r) = self.reverb.process((dry_l + dry_r) * 0.5);
+            if frame.len() == 1 {
+                frame[0] = crate::soft_clip((dry_l + dry_r) * 0.5 + (wet_l + wet_r) * 0.5);
+            } else {
+                frame[0] = crate::soft_clip(dry_l + wet_l);
+                let r = crate::soft_clip(dry_r + wet_r);
+                for o in frame[1..].iter_mut() {
+                    *o = r;
                 }
             }
+        }
+
+        // Keep the room ringing for a while after the last source stops.
+        if sources_quiet {
+            self.tail_frames = self.tail_frames.saturating_sub(frames as u32);
+        } else {
+            self.tail_frames = (self.mixer.sample_rate() * 3.0) as u32;
         }
 
         let pos = (self.mixer.time_f64() * self.mixer.sample_rate() as f64) as u32;
@@ -333,15 +354,38 @@ mod tests {
     }
 
     #[test]
-    fn stereo_frames_are_filled_on_every_channel() {
+    fn stereo_frames_carry_energy_on_both_channels() {
         let (h, mut core) = AudioCore::new(44_100.0);
         h.set_playing(true);
         h.note(Instrument::Keys, 60, 0.6, 0.5, 0.0);
-        let mut buf = vec![0.0f32; 4096];
+        let mut buf = vec![0.0f32; 16_384];
         core.fill(&mut buf, 2);
-        // both channels of a frame carry the same sample
-        let mismatched = buf.chunks(2).filter(|c| c[0] != c[1]).count();
-        assert_eq!(mismatched, 0, "channels drifted apart");
+        let l: Vec<f32> = buf.chunks(2).map(|c| c[0]).collect();
+        let r: Vec<f32> = buf.chunks(2).map(|c| c[1]).collect();
+        assert!(peak(&l) > 0.01, "left channel went missing");
+        assert!(peak(&r) > 0.01, "right channel went missing");
+        assert!(buf.iter().all(|s| s.is_finite()));
+    }
+
+    #[test]
+    fn the_room_rings_after_the_note_ends_and_then_goes_quiet() {
+        let (h, mut core) = AudioCore::new(44_100.0);
+        h.note(Instrument::Vibes, 60, 0.7, 0.2, 0.0);
+        // Consume the note and its release entirely (~1.2s of vibes lifetime).
+        let mut sounding = vec![0.0f32; 44_100 * 2 * 2];
+        core.fill(&mut sounding, 2);
+        // The sources are quiet now, but the room must still be ringing.
+        let mut ring = vec![0.0f32; 8_192];
+        core.fill(&mut ring, 2);
+        assert!(peak(&ring) > 1e-5, "the reverb tail was chopped off");
+        // And once the tail budget expires, truly silent again.
+        for _ in 0..40 {
+            let mut b = vec![0.0f32; 8_192];
+            core.fill(&mut b, 2);
+        }
+        let mut silent = vec![0.0f32; 4_096];
+        core.fill(&mut silent, 2);
+        assert_eq!(peak(&silent), 0.0, "the idle guard never re-engaged");
     }
 
     #[test]
