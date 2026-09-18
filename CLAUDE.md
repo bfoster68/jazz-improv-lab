@@ -243,6 +243,17 @@ drill or biography stays on screen while the band plays. The mixer rows fold
 into a "The band" `CollapsingHeader` (closed by default) and the now-sounding
 readout is one compact line, so the chart leads.
 
+The chart is itself a theory surface: clicking a bar opens a popover
+(`chord_popup_ui`) with the chord's degree-labelled tone chips, its suggested
+scale as playable chips (the resolving octave is shown as an eighth chip so
+sight matches sound), Hear-the-chord, Open-in-Theory, and a woodshed loop for
+that four-bar system. The loop is a scheduling map — `keep_audio_fed` cycles
+the bar index inside the window while time slots keep advancing on the same
+epoch — so engaging or releasing it mid-play is seamless from the next bar.
+Chips glow while their notes sound (`ChipRun`/`ChipGlow`: a travelling run, a
+chord ringing its tones together, or one clicked chip), in the popover, the
+Theory tab and the drill line alike.
+
 The Learn tab renders `jazz_theory::curriculum::LESSONS` as cards with a
 Beginner/Intermediate/Advanced filter (defaults Beginner; it is the landing
 tab). Its `try_it` buttons resolve per type: `Progression(id)` loads and plays
