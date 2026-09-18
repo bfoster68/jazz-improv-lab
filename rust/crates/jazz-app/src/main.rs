@@ -10,18 +10,17 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
 
-use jazz_audio::engine::{
-    self, plan_bar, BassStyle, CompStyle, Density, HornStyle, Rng, Settings,
-};
+use jazz_audio::engine::{self, plan_bar, BassStyle, CompStyle, Density, HornStyle, Rng, Settings};
 use jazz_audio::reverb::Reverb;
 use jazz_audio::stream::{AudioCore, AudioHandle};
-use jazz_theory::drill::{self, DRILL_IDS};
-use jazz_theory::harmony::{render_scale, find_scale, SCALES};
-use jazz_theory::note::{pc_name, use_sharp_for_root};
-use jazz_theory::ear::{self, Mode as EarMode, Question};
-use jazz_theory::listening::{Standard, ALSO_EXPLORE, MASTERS, STANDARDS};
-use jazz_theory::progression::{self, Bar, Progression};
 use jazz_audio::voice::Instrument;
+use jazz_theory::curriculum::{TryIt, LESSONS};
+use jazz_theory::drill::{self, DRILL_IDS};
+use jazz_theory::ear::{self, Mode as EarMode, Question};
+use jazz_theory::harmony::{find_scale, render_scale, SCALES};
+use jazz_theory::listening::{Standard, ALSO_EXPLORE, MASTERS, STANDARDS};
+use jazz_theory::note::{pc_name, use_sharp_for_root};
+use jazz_theory::progression::{self, Bar, Level, Progression};
 
 /// UI-side handle to the audio thread. Sending a command never blocks, which is
 /// what keeps playback free of dropouts.
@@ -37,6 +36,8 @@ struct AppState {
     scale_index: usize,
     scale_root: i32,
     tab: Tab,
+    /// Which curriculum level the Learn tab is showing.
+    learn_level: Level,
     volume: f32,
     ear_mode: EarMode,
     ear: EarState,
@@ -78,7 +79,7 @@ struct AppState {
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 enum Tab {
-    PlayAlong,
+    Learn,
     Theory,
     Drills,
     Ear,
@@ -132,7 +133,8 @@ fn main() {
             drill_key: 0,
             scale_index: 0,
             scale_root: 0,
-            tab: Tab::PlayAlong,
+            tab: Tab::Learn,
+            learn_level: Level::Beginner,
             volume: 1.0,
             ear_mode: EarMode::Intervals,
             ear: EarState::default(),
@@ -153,13 +155,18 @@ fn main() {
             sched_rng: Rng::new(0xC0FFEE),
         })
         .insert_resource(ClearColor(Color::srgb(0.06, 0.07, 0.09)))
-        .insert_non_send(AudioStream { stream: None, core: Some(core) })
+        .insert_non_send(AudioStream {
+            stream: None,
+            core: Some(core),
+        })
         .add_systems(Startup, setup_camera)
-        .add_systems(Update, (start_audio_on_first_interaction, keep_audio_fed).chain())
+        .add_systems(
+            Update,
+            (start_audio_on_first_interaction, keep_audio_fed).chain(),
+        )
         .add_systems(EguiPrimaryContextPass, ui)
         .run();
 }
-
 
 /// A fixed-width note cell.
 ///
@@ -298,7 +305,7 @@ fn ui(mut contexts: EguiContexts, mut state: ResMut<AppState>, audio: Res<Audio>
         ui.horizontal(|ui| {
             ui.heading("The Jazz Improvisation Lab");
             ui.separator();
-            ui.selectable_value(&mut state.tab, Tab::PlayAlong, "Play-Along");
+            ui.selectable_value(&mut state.tab, Tab::Learn, "Learn");
             ui.selectable_value(&mut state.tab, Tab::Theory, "Theory");
             ui.selectable_value(&mut state.tab, Tab::Drills, "Drills");
             ui.selectable_value(&mut state.tab, Tab::Ear, "Ear Training");
@@ -308,8 +315,17 @@ fn ui(mut contexts: EguiContexts, mut state: ResMut<AppState>, audio: Res<Audio>
         });
     });
 
+    // The stage: transport, band and chart, docked below every tab so a lesson,
+    // drill or biography can sit on screen while the band plays. Panels are
+    // laid out in declaration order, so the stage claims its height before the
+    // central teacher pane takes the rest.
+    egui::Panel::bottom("stage")
+        .resizable(true)
+        .default_size(330.0)
+        .show(&mut root, |ui| stage_ui(ui, &mut state, &audio));
+
     egui::CentralPanel::default().show(&mut root, |ui| match state.tab {
-        Tab::PlayAlong => play_along_ui(ui, &mut state, &audio),
+        Tab::Learn => learn_ui(ui, &mut state, &audio),
         Tab::Theory => theory_ui(ui, &mut state, &audio),
         Tab::Drills => drills_ui(ui, &mut state, &audio),
         Tab::Ear => ear_ui(ui, &mut state, &audio),
@@ -386,20 +402,34 @@ fn settings_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
             );
             ui.add_space(4.0);
             room_changed |= tunable(
-                ui, "Wet", &mut state.reverb_wet, 0.0..=0.6,
-                Reverb::DEFAULT_WET, "how much room is mixed in",
+                ui,
+                "Wet",
+                &mut state.reverb_wet,
+                0.0..=0.6,
+                Reverb::DEFAULT_WET,
+                "how much room is mixed in",
             );
             room_changed |= tunable(
-                ui, "Size", &mut state.reverb_room, 0.70..=0.97,
-                Reverb::DEFAULT_ROOM, "tail length - club to hall",
+                ui,
+                "Size",
+                &mut state.reverb_room,
+                0.70..=0.97,
+                Reverb::DEFAULT_ROOM,
+                "tail length - club to hall",
             );
             room_changed |= tunable(
-                ui, "Damping", &mut state.reverb_damp, 0.0..=0.9,
-                Reverb::DEFAULT_DAMP, "how fast the highs die away",
+                ui,
+                "Damping",
+                &mut state.reverb_damp,
+                0.0..=0.9,
+                Reverb::DEFAULT_DAMP,
+                "how fast the highs die away",
             );
         });
         if room_changed {
-            audio.0.set_reverb(state.reverb_room, state.reverb_damp, state.reverb_wet);
+            audio
+                .0
+                .set_reverb(state.reverb_room, state.reverb_damp, state.reverb_wet);
         }
         ui.add_space(8.0);
 
@@ -417,15 +447,23 @@ fn settings_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
             );
             ui.add_space(4.0);
             band_changed |= tunable(
-                ui, "Swing", &mut state.settings.swing_ratio, 0.50..=0.75,
-                engine::SWING_RATIO, "0.50 straight - 0.67 triplet - 0.75 hard",
+                ui,
+                "Swing",
+                &mut state.settings.swing_ratio,
+                0.50..=0.75,
+                engine::SWING_RATIO,
+                "0.50 straight - 0.67 triplet - 0.75 hard",
             );
         });
         ui.add_space(8.0);
 
         // ---- the ideas: the experimental generator ----
         ui.group(|ui| {
-            ui.label(egui::RichText::new("The ideas (experimental)").strong().color(gold));
+            ui.label(
+                egui::RichText::new("The ideas (experimental)")
+                    .strong()
+                    .color(gold),
+            );
             ui.label(
                 egui::RichText::new(
                     "The phrase generator on the Play-Along tab. Applies from the next bar.",
@@ -435,8 +473,12 @@ fn settings_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
             );
             ui.add_space(4.0);
             band_changed |= tunable(
-                ui, "Busyness", &mut state.settings.solo_density, 0.40..=0.95,
-                engine::IDEAS_BUSYNESS, "how dense the phrases are",
+                ui,
+                "Busyness",
+                &mut state.settings.solo_density,
+                0.40..=0.95,
+                engine::IDEAS_BUSYNESS,
+                "how dense the phrases are",
             );
         });
         if band_changed {
@@ -450,7 +492,9 @@ fn settings_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
             state.reverb_damp = Reverb::DEFAULT_DAMP;
             state.settings.swing_ratio = engine::SWING_RATIO;
             state.settings.solo_density = engine::IDEAS_BUSYNESS;
-            audio.0.set_reverb(state.reverb_room, state.reverb_damp, state.reverb_wet);
+            audio
+                .0
+                .set_reverb(state.reverb_room, state.reverb_damp, state.reverb_wet);
             resync(state, audio);
         }
     });
@@ -461,12 +505,32 @@ fn settings_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
 /// bottom line E4 is 30 and its top line F5 is 38.
 fn staff_step(midi: i32, use_sharp: bool) -> (i32, &'static str) {
     const SHARP: [(i32, &'static str); 12] = [
-        (0, ""), (0, "#"), (1, ""), (1, "#"), (2, ""), (3, ""),
-        (3, "#"), (4, ""), (4, "#"), (5, ""), (5, "#"), (6, ""),
+        (0, ""),
+        (0, "#"),
+        (1, ""),
+        (1, "#"),
+        (2, ""),
+        (3, ""),
+        (3, "#"),
+        (4, ""),
+        (4, "#"),
+        (5, ""),
+        (5, "#"),
+        (6, ""),
     ];
     const FLAT: [(i32, &'static str); 12] = [
-        (0, ""), (1, "b"), (1, ""), (2, "b"), (2, ""), (3, ""),
-        (4, "b"), (4, ""), (5, "b"), (5, ""), (6, "b"), (6, ""),
+        (0, ""),
+        (1, "b"),
+        (1, ""),
+        (2, "b"),
+        (2, ""),
+        (3, ""),
+        (4, "b"),
+        (4, ""),
+        (5, "b"),
+        (5, ""),
+        (6, "b"),
+        (6, ""),
     ];
     let (letter, acc) = if use_sharp {
         SHARP[midi.rem_euclid(12) as usize]
@@ -536,12 +600,20 @@ fn solo_sheet_ui(ui: &mut egui::Ui, state: &AppState) {
                     // Ledger lines below and above the staff.
                     let mut s = 28;
                     while s >= step {
-                        painter.hline((x - 5.5)..=(x + 5.5), y_of(s), egui::Stroke::new(1.0, faint));
+                        painter.hline(
+                            (x - 5.5)..=(x + 5.5),
+                            y_of(s),
+                            egui::Stroke::new(1.0, faint),
+                        );
                         s -= 2;
                     }
                     let mut s = 40;
                     while s <= step {
-                        painter.hline((x - 5.5)..=(x + 5.5), y_of(s), egui::Stroke::new(1.0, faint));
+                        painter.hline(
+                            (x - 5.5)..=(x + 5.5),
+                            y_of(s),
+                            egui::Stroke::new(1.0, faint),
+                        );
                         s += 2;
                     }
                     painter.circle_filled(egui::pos2(x, y), 3.4, ink);
@@ -590,7 +662,10 @@ fn apply_style(ctx: &egui::Context) {
     });
 }
 
-fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
+/// The stage: the always-visible bottom panel holding the transport, the band
+/// and the lead-sheet chart. The tabs above teach; this is where it sounds, so
+/// a lesson's "hear it" never has to steal the screen from the lesson.
+fn stage_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     let playing = audio.0.is_playing();
 
     ui.horizontal(|ui| {
@@ -606,7 +681,14 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
         if state.prog_index != before {
             load_progression(state, audio, state.prog_index, playing);
         }
-        if ui.button(if playing { "\u{23F8} Stop" } else { "\u{25B6} Play" }).clicked() {
+        if ui
+            .button(if playing {
+                "\u{23F8} Stop"
+            } else {
+                "\u{25B6} Play"
+            })
+            .clicked()
+        {
             if playing {
                 audio.0.set_playing(false);
             } else {
@@ -616,7 +698,10 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // Which engine is sounding — so nobody has to guess whether the
             // GM samples actually loaded.
-            let engine = state.audio_engine.as_deref().unwrap_or("audio starts on first click");
+            let engine = state
+                .audio_engine
+                .as_deref()
+                .unwrap_or("audio starts on first click");
             ui.label(egui::RichText::new(engine).weak().size(12.0));
         });
     });
@@ -652,67 +737,100 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
         }
     });
 
-    // ---- per-part mixer: pick the instrument and on/off for each part ----
+    // ---- per-part mixer: pick the instrument and on/off for each part.
+    // Folded away by default so the stage leads with the chart; the header
+    // stays one click away while the band plays.
     let mut dirty = false;
-    ui.horizontal(|ui| {
-        dirty |= ui.checkbox(&mut state.settings.bass, "Bass").changed();
-        dirty |= instrument_combo(ui, "bass_inst", &mut state.settings.bass_inst, &Instrument::BASS_CHOICES);
-        ui.label("  Line");
-        egui::ComboBox::from_id_salt("bass_style")
-            .selected_text(state.settings.bass_style.label())
-            .show_ui(ui, |ui| {
-                for s in BassStyle::ALL {
-                    dirty |= ui.selectable_value(&mut state.settings.bass_style, s, s.label()).changed();
-                }
+    egui::CollapsingHeader::new("The band")
+        .default_open(false)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                dirty |= ui.checkbox(&mut state.settings.bass, "Bass").changed();
+                dirty |= instrument_combo(
+                    ui,
+                    "bass_inst",
+                    &mut state.settings.bass_inst,
+                    &Instrument::BASS_CHOICES,
+                );
+                ui.label("  Line");
+                egui::ComboBox::from_id_salt("bass_style")
+                    .selected_text(state.settings.bass_style.label())
+                    .show_ui(ui, |ui| {
+                        for s in BassStyle::ALL {
+                            dirty |= ui
+                                .selectable_value(&mut state.settings.bass_style, s, s.label())
+                                .changed();
+                        }
+                    });
             });
-    });
-    ui.horizontal(|ui| {
-        dirty |= ui.checkbox(&mut state.settings.chords, "Comp").changed();
-        dirty |= instrument_combo(ui, "comp_inst", &mut state.settings.comp_inst, &Instrument::COMP_CHOICES);
-        ui.label("  Style");
-        egui::ComboBox::from_id_salt("comp_style")
-            .selected_text(state.settings.comp_style.label())
-            .show_ui(ui, |ui| {
-                for s in CompStyle::ALL {
-                    dirty |= ui.selectable_value(&mut state.settings.comp_style, s, s.label()).changed();
-                }
+            ui.horizontal(|ui| {
+                dirty |= ui.checkbox(&mut state.settings.chords, "Comp").changed();
+                dirty |= instrument_combo(
+                    ui,
+                    "comp_inst",
+                    &mut state.settings.comp_inst,
+                    &Instrument::COMP_CHOICES,
+                );
+                ui.label("  Style");
+                egui::ComboBox::from_id_salt("comp_style")
+                    .selected_text(state.settings.comp_style.label())
+                    .show_ui(ui, |ui| {
+                        for s in CompStyle::ALL {
+                            dirty |= ui
+                                .selectable_value(&mut state.settings.comp_style, s, s.label())
+                                .changed();
+                        }
+                    });
+                ui.label("  Feel");
+                egui::ComboBox::from_id_salt("comping")
+                    .selected_text(format!("{:?}", state.settings.density))
+                    .show_ui(ui, |ui| {
+                        for d in [Density::Sparse, Density::Medium, Density::Busy] {
+                            dirty |= ui
+                                .selectable_value(&mut state.settings.density, d, format!("{d:?}"))
+                                .changed();
+                        }
+                    });
             });
-        ui.label("  Feel");
-        egui::ComboBox::from_id_salt("comping")
-            .selected_text(format!("{:?}", state.settings.density))
-            .show_ui(ui, |ui| {
-                for d in [Density::Sparse, Density::Medium, Density::Busy] {
-                    dirty |= ui.selectable_value(&mut state.settings.density, d, format!("{d:?}")).changed();
-                }
+            ui.horizontal(|ui| {
+                dirty |= ui.checkbox(&mut state.settings.horns, "Horns").changed();
+                ui.label("  ");
+                egui::ComboBox::from_id_salt("horn_style")
+                    .selected_text(state.settings.horn_style.label())
+                    .show_ui(ui, |ui| {
+                        for s in HornStyle::ALL {
+                            dirty |= ui
+                                .selectable_value(&mut state.settings.horn_style, s, s.label())
+                                .changed();
+                        }
+                    });
+                ui.label(
+                    egui::RichText::new("  trombone \u{00B7} sax \u{00B7} trumpet")
+                        .weak()
+                        .size(12.0),
+                );
             });
-    });
-    ui.horizontal(|ui| {
-        dirty |= ui.checkbox(&mut state.settings.horns, "Horns").changed();
-        ui.label("  ");
-        egui::ComboBox::from_id_salt("horn_style")
-            .selected_text(state.settings.horn_style.label())
-            .show_ui(ui, |ui| {
-                for s in HornStyle::ALL {
-                    dirty |= ui.selectable_value(&mut state.settings.horn_style, s, s.label()).changed();
+            ui.horizontal(|ui| {
+                dirty |= ui.checkbox(&mut state.settings.solo, "Ideas").changed();
+                dirty |= instrument_combo(
+                    ui,
+                    "solo_inst",
+                    &mut state.settings.solo_inst,
+                    &Instrument::ALL,
+                );
+                if ui.button("Sheet").clicked() {
+                    state.show_sheet = !state.show_sheet;
                 }
+                ui.label(
+                    egui::RichText::new("  experimental: phrase ideas to sing and steal")
+                        .weak()
+                        .size(12.0),
+                );
             });
-        ui.label(egui::RichText::new("  trombone \u{00B7} sax \u{00B7} trumpet").weak().size(12.0));
-    });
-    ui.horizontal(|ui| {
-        dirty |= ui.checkbox(&mut state.settings.solo, "Ideas").changed();
-        dirty |= instrument_combo(ui, "solo_inst", &mut state.settings.solo_inst, &Instrument::ALL);
-        if ui.button("Sheet").clicked() {
-            state.show_sheet = !state.show_sheet;
-        }
-        ui.label(
-            egui::RichText::new("  experimental: phrase ideas to sing and steal")
-                .weak()
-                .size(12.0),
-        );
-    });
-    ui.horizontal(|ui| {
-        dirty |= ui.checkbox(&mut state.settings.drums, "Drums").changed();
-    });
+            ui.horizontal(|ui| {
+                dirty |= ui.checkbox(&mut state.settings.drums, "Drums").changed();
+            });
+        });
     if dirty {
         resync(state, audio);
     }
@@ -732,7 +850,6 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     };
 
     let slot = bars[current].chord_at(0);
-    ui.label(egui::RichText::new(bars[current].symbol()).size(34.0).strong());
     let use_sharp = slot.use_sharp();
     let root_note = jazz_theory::note::Note::parse(pc_name(slot.root, use_sharp));
     let tones: Vec<String> = slot
@@ -748,10 +865,25 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
             )
         })
         .collect();
-    ui.label(format!("Aim at: {}", tones.join("   ")));
-    ui.label(format!("Suggested scale: {}", slot.scale_name()));
+    // One line, chord first: the stage shares the window with a lesson now, so
+    // the now-sounding readout earns its height back.
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(bars[current].symbol())
+                .size(26.0)
+                .strong(),
+        );
+        ui.vertical(|ui| {
+            ui.label(egui::RichText::new(format!("Aim at: {}", tones.join("   "))).size(13.0));
+            ui.label(
+                egui::RichText::new(format!("Suggested scale: {}", slot.scale_name()))
+                    .size(13.0)
+                    .weak(),
+            );
+        });
+    });
 
-    ui.add_space(10.0);
+    ui.add_space(4.0);
     // ---- the chart: four-bar systems that read like a lead sheet ----
     let sections = state.progs[state.prog_index].sections;
     let gold = egui::Color32::from_rgb(224, 166, 60);
@@ -809,7 +941,10 @@ fn play_along_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
             });
             // Follow along: bring the sounding system into view once per bar,
             // so the reader tracks the form but can still scroll around freely.
-            if playing && (start..start + chunk.len()).contains(&current) && state.chart_bar != current {
+            if playing
+                && (start..start + chunk.len()).contains(&current)
+                && state.chart_bar != current
+            {
                 row.response.scroll_to_me(Some(egui::Align::Center));
                 state.chart_bar = current;
             }
@@ -846,7 +981,9 @@ fn resync(state: &mut AppState, audio: &Audio) {
     // Drop only what is queued from the next bar boundary on — the remainder of
     // the current bar keeps playing with the old settings — then reschedule from
     // that boundary.
-    audio.0.clear_pending_from(state.epoch + next_bar as f32 * bar_len);
+    audio
+        .0
+        .clear_pending_from(state.epoch + next_bar as f32 * bar_len);
     state.scheduled_bars = next_bar;
 }
 
@@ -880,14 +1017,105 @@ fn restart_transport(state: &mut AppState, audio: &Audio, play: bool) {
     audio.0.set_playing(play);
 }
 
+/// The Learn tab: the written curriculum as cards, in teaching order, filtered
+/// by level. Each lesson's `try_it` loads the thing it names — a progression
+/// starts on the stage below without leaving the lesson; a drill or scale
+/// switches to its teacher tab with the material already selected.
+fn learn_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
+    let gold = egui::Color32::from_rgb(224, 166, 60);
+    ui.horizontal(|ui| {
+        ui.label("Level");
+        for (lvl, label) in [
+            (Level::Beginner, "Beginner"),
+            (Level::Intermediate, "Intermediate"),
+            (Level::Advanced, "Advanced"),
+        ] {
+            ui.selectable_value(&mut state.learn_level, lvl, label);
+        }
+    });
+    ui.separator();
+
+    // Defer the load until after the loop so `state` is not borrowed twice —
+    // the same pattern as `standards_ui`.
+    let mut act: Option<TryIt> = None;
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        for lesson in LESSONS.iter().filter(|l| l.level == state.learn_level) {
+            ui.group(|ui| {
+                ui.label(
+                    egui::RichText::new(lesson.title)
+                        .strong()
+                        .size(18.0)
+                        .color(gold),
+                );
+                ui.add_space(2.0);
+                for para in lesson.body.split("\n\n") {
+                    ui.add(egui::Label::new(egui::RichText::new(para).size(14.0)).wrap());
+                    ui.add_space(4.0);
+                }
+                if let Some(t) = lesson.try_it {
+                    let label = match t {
+                        TryIt::Drill(id) => format!("\u{25B6} Try it: {id}"),
+                        TryIt::Progression(id) => {
+                            let name = state
+                                .progs
+                                .iter()
+                                .find(|p| p.id == id)
+                                .map(|p| p.name)
+                                .unwrap_or(id);
+                            format!("\u{25B6} Hear it: {name}")
+                        }
+                        TryIt::Scale(name) => format!("\u{25B6} See it: {name}"),
+                    };
+                    if ui.button(label).clicked() {
+                        act = Some(t);
+                    }
+                }
+            });
+            ui.add_space(6.0);
+        }
+    });
+
+    if let Some(t) = act {
+        match t {
+            // The stage is docked below, so hearing a form never leaves the
+            // lesson that is teaching it.
+            TryIt::Progression(id) => {
+                if let Some(i) = state.progs.iter().position(|p| p.id == id) {
+                    state.prog_index = i;
+                    load_progression(state, audio, i, true);
+                }
+            }
+            TryIt::Drill(id) => {
+                if let Some(i) = DRILL_IDS.iter().position(|d| *d == id) {
+                    state.drill_index = i;
+                    state.tab = Tab::Drills;
+                }
+            }
+            TryIt::Scale(name) => {
+                if let Some(i) = SCALES.iter().position(|s| s.name == name) {
+                    state.scale_index = i;
+                    state.tab = Tab::Theory;
+                }
+            }
+        }
+    }
+}
+
 fn theory_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     ui.horizontal(|ui| {
         ui.label("Root");
         egui::ComboBox::from_id_salt("root")
-            .selected_text(pc_name(state.scale_root, use_sharp_for_root(state.scale_root)))
+            .selected_text(pc_name(
+                state.scale_root,
+                use_sharp_for_root(state.scale_root),
+            ))
             .show_ui(ui, |ui| {
                 for r in 0..12 {
-                    ui.selectable_value(&mut state.scale_root, r, pc_name(r, use_sharp_for_root(r)));
+                    ui.selectable_value(
+                        &mut state.scale_root,
+                        r,
+                        pc_name(r, use_sharp_for_root(r)),
+                    );
                 }
             });
         ui.label("Scale");
@@ -901,13 +1129,19 @@ fn theory_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     });
     ui.separator();
     let scale = &SCALES[state.scale_index];
-    let notes = render_scale(scale, state.scale_root, use_sharp_for_root(state.scale_root));
+    let notes = render_scale(
+        scale,
+        state.scale_root,
+        use_sharp_for_root(state.scale_root),
+    );
     let root_midi = jazz_theory::note::midi_for(state.scale_root, 4);
     ui.horizontal_wrapped(|ui| {
         for n in &notes {
             // clicking a note sounds it, the same as the browser version
             if note_chip(ui, &n.name, &n.degree).clicked() {
-                audio.0.note(Instrument::Vibes, root_midi + n.semitones, 0.20, 0.50, 0.0);
+                audio
+                    .0
+                    .note(Instrument::Vibes, root_midi + n.semitones, 0.20, 0.50, 0.0);
             }
         }
     });
@@ -916,10 +1150,22 @@ fn theory_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     ui.horizontal(|ui| {
         if ui.button("\u{25B6} Play ascending").clicked() {
             for (i, n) in notes.iter().enumerate() {
-                audio.0.note(Instrument::Vibes, root_midi + n.semitones, 0.20, 0.30, i as f32 * 0.34);
+                audio.0.note(
+                    Instrument::Vibes,
+                    root_midi + n.semitones,
+                    0.20,
+                    0.30,
+                    i as f32 * 0.34,
+                );
             }
             // top off with the octave so the scale resolves
-            audio.0.note(Instrument::Vibes, root_midi + 12, 0.20, 0.40, notes.len() as f32 * 0.34);
+            audio.0.note(
+                Instrument::Vibes,
+                root_midi + 12,
+                0.20,
+                0.40,
+                notes.len() as f32 * 0.34,
+            );
         }
         if ui.button("\u{25B6} Play as a chord").clicked() {
             let midis: Vec<i32> = notes.iter().map(|n| root_midi + n.semitones).collect();
@@ -944,7 +1190,10 @@ fn drills_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
             });
         ui.label("Key");
         egui::ComboBox::from_id_salt("key")
-            .selected_text(pc_name(state.drill_key, use_sharp_for_root(state.drill_key)))
+            .selected_text(pc_name(
+                state.drill_key,
+                use_sharp_for_root(state.drill_key),
+            ))
             .show_ui(ui, |ui| {
                 for r in 0..12 {
                     ui.selectable_value(&mut state.drill_key, r, pc_name(r, use_sharp_for_root(r)));
@@ -958,7 +1207,9 @@ fn drills_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             for b in &d.bars {
-                ui.group(|ui| { ui.label(b); });
+                ui.group(|ui| {
+                    ui.label(b);
+                });
             }
         });
         ui.add_space(6.0);
@@ -974,7 +1225,9 @@ fn drills_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
         ui.add_space(8.0);
         if ui.button("\u{25B6} Play the line").clicked() {
             for (i, n) in d.notes.iter().enumerate() {
-                audio.0.note(Instrument::Vibes, n.midi, 0.20, 0.30, i as f32 * 0.33);
+                audio
+                    .0
+                    .note(Instrument::Vibes, n.midi, 0.20, 0.30, i as f32 * 0.33);
             }
         }
         ui.add_space(6.0);
@@ -1118,8 +1371,11 @@ fn masters_ui(ui: &mut egui::Ui, state: &mut AppState) {
                 format!("{} \u{2013} {}", m.born, m.died)
             };
             ui.label(
-                egui::RichText::new(format!("{} \u{00B7} {} \u{00B7} {}", m.instrument, m.era, dates))
-                    .weak(),
+                egui::RichText::new(format!(
+                    "{} \u{00B7} {} \u{00B7} {}",
+                    m.instrument, m.era, dates
+                ))
+                .weak(),
             );
             ui.add_space(10.0);
             ui.add(egui::Label::new(egui::RichText::new(m.bio).size(15.0)).wrap());
@@ -1161,7 +1417,9 @@ fn masters_ui(ui: &mut egui::Ui, state: &mut AppState) {
             let card = ui.group(|ui| {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new(m.name).strong().color(gold));
-                    ui.label(egui::RichText::new(format!("{} \u{00B7} {}", m.instrument, m.era)).weak());
+                    ui.label(
+                        egui::RichText::new(format!("{} \u{00B7} {}", m.instrument, m.era)).weak(),
+                    );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(egui::RichText::new("their story \u{25B6}").weak());
                     });
@@ -1180,7 +1438,11 @@ fn masters_ui(ui: &mut egui::Ui, state: &mut AppState) {
             state.selected_master = Some(i);
         }
         ui.add_space(4.0);
-        ui.label(egui::RichText::new(format!("And more to explore: {ALSO_EXPLORE}")).italics().weak());
+        ui.label(
+            egui::RichText::new(format!("And more to explore: {ALSO_EXPLORE}"))
+                .italics()
+                .weak(),
+        );
     });
 }
 
@@ -1192,7 +1454,7 @@ fn standards_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
             egui::RichText::new(
                 "Learn the melody and the changes, then improvise. \"Comp me\" starts a \
                  sparse trio behind your solo; \"Full band\" adds the horn section. Both \
-                 load the tune into Play-Along at its own tempo and feel.",
+                 start the tune on the stage below at its own tempo and feel.",
             )
             .weak(),
         );
@@ -1205,8 +1467,9 @@ fn standards_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new(st.title).strong());
                     ui.label(egui::RichText::new(format!("\u{2014} {}", st.composer)).weak());
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        match st.progression_id {
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| match st.progression_id {
                             Some(_) => {
                                 if ui.button("\u{25B6} Full band").clicked() {
                                     load = Some((st, true));
@@ -1218,8 +1481,8 @@ fn standards_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
                             None => {
                                 ui.label(egui::RichText::new("study by ear").weak());
                             }
-                        }
-                    });
+                        },
+                    );
                 });
                 ui.label(egui::RichText::new(st.key_and_form).weak());
                 ui.label(st.teaches);
@@ -1234,12 +1497,14 @@ fn standards_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
 
 /// Start jamming a standard: apply its idiomatic tempo and feel, set the band
 /// up for the chosen mode — a sparse comping trio that leaves room for the
-/// student's solo, or the full band with the horn section — and drop into the
-/// Play-Along tab already playing. The chosen instruments (comp voice, bass,
+/// student's solo, or the full band with the horn section — and start it
+/// playing on the stage below. The chosen instruments (comp voice, bass,
 /// horns) are the user's own from the per-part mixer.
 fn start_jam(state: &mut AppState, audio: &Audio, st: &Standard, full_band: bool) {
     let Some(id) = st.progression_id else { return };
-    let Some(i) = state.progs.iter().position(|p| p.id == id) else { return };
+    let Some(i) = state.progs.iter().position(|p| p.id == id) else {
+        return;
+    };
     state.prog_index = i;
     state.settings.tempo = st.tempo;
     state.pending_tempo = None;
@@ -1250,9 +1515,13 @@ fn start_jam(state: &mut AppState, audio: &Audio, st: &Standard, full_band: bool
     state.settings.horns = full_band;
     state.settings.horn_style = HornStyle::Pads;
     state.settings.solo = false; // the jam presets back *your* solo
-    state.settings.density = if full_band { Density::Medium } else { Density::Sparse };
+    state.settings.density = if full_band {
+        Density::Medium
+    } else {
+        Density::Sparse
+    };
     load_progression(state, audio, i, true);
-    state.tab = Tab::PlayAlong;
+    // No tab switch: the stage is docked below, so the tune list stays put.
 }
 
 /// Open the default output device and hand the core to the callback.
@@ -1313,8 +1582,14 @@ fn start_audio(mut core: AudioCore) -> Result<(cpal::Stream, String), (AudioCore
     match built {
         Ok(stream) => match stream.play() {
             Ok(()) => Ok((stream, engine)),
-            Err(e) => Err((AudioCore::new(44_100.0).1, format!("could not start stream: {e}"))),
+            Err(e) => Err((
+                AudioCore::new(44_100.0).1,
+                format!("could not start stream: {e}"),
+            )),
         },
-        Err(e) => Err((AudioCore::new(44_100.0).1, format!("could not open stream: {e}"))),
+        Err(e) => Err((
+            AudioCore::new(44_100.0).1,
+            format!("could not open stream: {e}"),
+        )),
     }
 }

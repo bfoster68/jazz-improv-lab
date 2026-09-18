@@ -233,22 +233,23 @@ Recently done, in order:
    the mixer follow the device sample rate.
 5. Added optional SoundFont playback, and trimmed Bevy from 409 crates to 258.
 
-### Next step: wire the Learn tab
+### The Teacher & Stage layout
 
-The content is written and tested in `jazz_theory::curriculum` but nothing renders
-it yet. `LESSONS` is a flat slice already in teaching order, each carrying:
+The Bevy app no longer has a Play-Along tab. The transport, band and chart live
+in a persistent, resizable bottom panel — the *stage* (`stage_ui`, an
+`egui::Panel::bottom`) — and the tabs above it are the *teacher pane*: Learn,
+Theory, Drills, Ear Training, Masters, Standards, Settings. The point: a lesson,
+drill or biography stays on screen while the band plays. The mixer rows fold
+into a "The band" `CollapsingHeader` (closed by default) and the now-sounding
+readout is one compact line, so the chart leads.
 
-- `level` — `Beginner` / `Intermediate` / `Advanced`
-- `title`, `body` (paragraphs separated by a blank line)
-- `try_it: Option<TryIt>` — `Drill(id)`, `Progression(id)` or `Scale(name)`
-
-The work is: add a `Tab::Learn`, put a level filter across the top (the browser
-build defaults to Beginner), render each lesson as a card, and turn `try_it` into a
-button that switches tab and loads the thing it names. `listening_ui` already does
-exactly that pattern for standards — copy its `load` approach, which defers the
-mutation until after the loop to avoid borrowing `state` twice.
-
-Every `try_it` is guaranteed to resolve; a test enforces it.
+The Learn tab renders `jazz_theory::curriculum::LESSONS` as cards with a
+Beginner/Intermediate/Advanced filter (defaults Beginner; it is the landing
+tab). Its `try_it` buttons resolve per type: `Progression(id)` loads and plays
+on the stage *without leaving the lesson*; `Drill(id)` / `Scale(name)` switch
+to that tab with the material pre-selected (deferred-load pattern from
+`standards_ui`). The standards' "Comp me" / "Full band" likewise no longer
+switch tabs — the tune list stays put and the band starts below.
 
 ### Open questions worth checking with the user
 
@@ -259,9 +260,6 @@ Every `try_it` is guaranteed to resolve; a test enforces it.
 
 ## Known gaps
 
-- The Learn curriculum is written and tested in `jazz_theory::curriculum` but not
-  yet wired into a Bevy tab. `LESSONS` carries level, title, body and an optional
-  `TryIt` cross-reference; rendering it is the next step.
 - Both builds can use real samples: the web app streams FluidR3 from a CDN, the
   Rust app loads any GM `.sf2` from `crates/jazz-app/assets/soundfont.sf2` via
   `rustysynth` (feature `soundfont`). Neither bundles one.
