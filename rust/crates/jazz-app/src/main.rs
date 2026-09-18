@@ -68,6 +68,16 @@ struct AppState {
     reverb_wet: f32,
     reverb_room: f32,
     reverb_damp: f32,
+    /// The chord popover: the clicked chart bar and where to draw the window.
+    chart_popup: Option<(usize, egui::Pos2)>,
+    /// The note-chip row currently being played back, so the chip under the
+    /// sounding note lights up. One row plays at a time; a stale run simply
+    /// stops matching once its last note has passed.
+    chip_run: Option<ChipRun>,
+    /// The woodshed loop: (first bar, bar count) the transport is cycling, if
+    /// any. Scheduling maps through it, so the rest of the form simply never
+    /// comes up until the loop is released.
+    loop_range: Option<(usize, usize)>,
     /// Audio-clock time (seconds) at which the current transport started. The
     /// mixer clock free-runs and is never reset, so bars must be scheduled
     /// relative to this epoch rather than to absolute zero — otherwise a restart
@@ -148,6 +158,9 @@ fn main() {
             selected_master: None,
             audio_engine: None,
             show_sheet: false,
+            chart_popup: None,
+            chip_run: None,
+            loop_range: None,
             reverb_wet: Reverb::DEFAULT_WET,
             reverb_room: Reverb::DEFAULT_ROOM,
             reverb_damp: Reverb::DEFAULT_DAMP,
@@ -168,13 +181,63 @@ fn main() {
         .run();
 }
 
-/// A fixed-width note cell.
+/// What a [`ChipRun`] is lighting: a note-by-note run travelling chip to chip,
+/// the first `n` chips together while a chord rings, or one clicked chip.
+enum ChipGlow {
+    Run,
+    Chord(usize),
+    Single(usize),
+}
+
+/// A row of note chips being sounded: which row it is, when it started on the
+/// audio clock, the note spacing (or, for a chord and a single note, how long
+/// it rings), and the shape of the glow — enough to know which chips sit under
+/// sounding notes on any later frame.
+struct ChipRun {
+    row: egui::Id,
+    started: f32,
+    step: f32,
+    count: usize,
+    glow: ChipGlow,
+}
+
+/// Is chip `k` of `row` (a row of `count` chips) under a sounding note right
+/// now? Bevy redraws every frame, so this is what makes the glow travel with
+/// a run, ring with a chord, and flash on a click.
+fn chip_lit(run: &Option<ChipRun>, audio: &Audio, row: egui::Id, count: usize, k: usize) -> bool {
+    let Some(run) = run.as_ref() else {
+        return false;
+    };
+    if run.row != row || run.count != count {
+        return false;
+    }
+    let elapsed = audio.0.time() - run.started;
+    if elapsed < 0.0 {
+        return false;
+    }
+    match run.glow {
+        ChipGlow::Run => {
+            elapsed < run.step * run.count as f32 && (elapsed / run.step) as usize == k
+        }
+        ChipGlow::Chord(n) => k < n && elapsed < run.step,
+        ChipGlow::Single(only) => k == only && elapsed < run.step,
+    }
+}
+
+/// A fixed-width note cell; `active` lights it gold while its note sounds.
 ///
 /// `vertical_centered` claims all remaining width, so a chip built with it inside
 /// a wrapped row swallows the line and hides every note after the first. Setting an
 /// explicit width is what makes the row wrap correctly.
-fn note_chip(ui: &mut egui::Ui, name: &str, degree: &str) -> egui::Response {
-    let r = ui.group(|ui| {
+fn note_chip(ui: &mut egui::Ui, name: &str, degree: &str, active: bool) -> egui::Response {
+    let gold = egui::Color32::from_rgb(224, 166, 60);
+    let mut frame = egui::Frame::group(ui.style());
+    if active {
+        frame = frame
+            .fill(egui::Color32::from_rgb(66, 50, 18))
+            .stroke(egui::Stroke::new(1.5, gold));
+    }
+    let r = frame.show(ui, |ui| {
         ui.set_width(52.0);
         ui.vertical_centered(|ui| {
             ui.label(egui::RichText::new(name).size(19.0).strong());
@@ -274,7 +337,13 @@ fn keep_audio_fed(audio: Res<Audio>, mut state: ResMut<AppState>) {
     // free-running mixer clock was when this transport started.
     while epoch + (state.scheduled_bars as f32) * bar_len < now + bar_len * 4.0 {
         let i = state.scheduled_bars;
-        let plan = plan_bar(&state.bars, i, &settings, &mut state.sched_rng);
+        // The woodshed loop: slot `i` in time still advances, but the bar it
+        // plays cycles inside the looped window.
+        let bar_index = match state.loop_range {
+            Some((start, len)) => start + i % len,
+            None => i,
+        };
+        let plan = plan_bar(&state.bars, bar_index, &settings, &mut state.sched_rng);
         audio.0.schedule(plan, epoch + i as f32 * bar_len);
         state.scheduled_bars += 1;
     }
@@ -844,7 +913,13 @@ fn stage_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     let bar_len = state.settings.bar_len();
     let current = if playing {
         let elapsed = (audio.0.time() - state.epoch).max(0.0);
-        ((elapsed / bar_len) as usize) % bars.len()
+        let n = (elapsed / bar_len) as usize;
+        // Mirror the scheduler's loop mapping so the highlight sits on the
+        // bar that is actually sounding.
+        match state.loop_range {
+            Some((start, len)) => start + n % len,
+            None => n % bars.len(),
+        }
     } else {
         0
     };
@@ -887,14 +962,29 @@ fn stage_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     // ---- the chart: four-bar systems that read like a lead sheet ----
     let sections = state.progs[state.prog_index].sections;
     let gold = egui::Color32::from_rgb(224, 166, 60);
-    ui.label(
-        egui::RichText::new(format!(
-            "{} \u{00B7} {} bars",
-            state.settings.meter.label(),
-            bars.len()
-        ))
-        .weak(),
-    );
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(format!(
+                "{} \u{00B7} {} bars",
+                state.settings.meter.label(),
+                bars.len()
+            ))
+            .weak(),
+        );
+        if let Some((s, l)) = state.loop_range {
+            if ui
+                .small_button(format!(
+                    "Looping bars {}\u{2013}{} \u{2014} release",
+                    s + 1,
+                    s + l
+                ))
+                .clicked()
+            {
+                state.loop_range = None;
+                resync(state, audio);
+            }
+        }
+    });
     egui::ScrollArea::vertical().show(ui, |ui| {
         for (sys, chunk) in bars.chunks(4).enumerate() {
             let start = sys * 4;
@@ -926,8 +1016,18 @@ fn stage_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
                     } else {
                         (egui::Color32::TRANSPARENT, ui.visuals().text_color())
                     };
-                    egui::Frame::default()
+                    // A gold outline marks the woodshed loop's window.
+                    let in_loop = state
+                        .loop_range
+                        .is_some_and(|(s, l)| (s..s + l).contains(&i));
+                    let stroke = if in_loop {
+                        egui::Stroke::new(1.0, gold)
+                    } else {
+                        egui::Stroke::NONE
+                    };
+                    let cell = egui::Frame::default()
                         .fill(fill)
+                        .stroke(stroke)
                         .corner_radius(egui::CornerRadius::same(4))
                         .inner_margin(egui::Margin::symmetric(4, 6))
                         .show(ui, |ui| {
@@ -935,7 +1035,17 @@ fn stage_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
                             ui.vertical_centered(|ui| {
                                 ui.label(egui::RichText::new(sym).size(17.0).strong().color(color));
                             });
-                        });
+                        })
+                        .response
+                        .interact(egui::Sense::click())
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                    // Click a bar to open it as a theory surface: its tones,
+                    // its scale, and the loop that woodsheds it.
+                    if cell.clicked() {
+                        let rect = cell.rect;
+                        let pos = egui::pos2(rect.left(), (rect.top() - 360.0).max(20.0));
+                        state.chart_popup = Some((i, pos));
+                    }
                 }
                 ui.label(egui::RichText::new("|").weak().size(22.0));
             });
@@ -950,12 +1060,249 @@ fn stage_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
             }
         }
     });
+
+    // ---- the chord popover: a chart cell opened as a theory surface ----
+    if let Some((bi, pos)) = state.chart_popup {
+        if bi >= bars.len() {
+            state.chart_popup = None;
+        } else {
+            let mut open = true;
+            let mut action = None;
+            egui::Window::new(bars[bi].symbol())
+                .id(egui::Id::new("chord_popup"))
+                .open(&mut open)
+                .current_pos(pos)
+                .resizable(false)
+                .collapsible(false)
+                .show(ui.ctx(), |ui| {
+                    let loop_range = state.loop_range;
+                    action = chord_popup_ui(
+                        ui,
+                        &bars[bi],
+                        bi,
+                        bars.len(),
+                        loop_range,
+                        &mut state.chip_run,
+                        audio,
+                    );
+                });
+            if !open {
+                state.chart_popup = None;
+            }
+            if let Some(a) = action {
+                apply_chart_action(state, audio, a);
+            }
+        }
+    }
+}
+
+/// What a chord-popover button asked for. Buttons that only make sound act
+/// immediately; anything that mutates `AppState` is returned and applied after
+/// the window gives back its borrow.
+enum ChartAction {
+    OpenTheory { scale_index: usize, root: i32 },
+    LoopSystem(usize),
+    LoopOff,
+}
+
+fn apply_chart_action(state: &mut AppState, audio: &Audio, a: ChartAction) {
+    match a {
+        ChartAction::OpenTheory { scale_index, root } => {
+            state.scale_index = scale_index;
+            state.scale_root = root;
+            state.tab = Tab::Theory;
+        }
+        ChartAction::LoopSystem(bi) => {
+            let start = (bi / 4) * 4;
+            let len = (state.bars.len() - start).min(4);
+            state.loop_range = Some((start, len));
+            resync(state, audio);
+        }
+        ChartAction::LoopOff => {
+            state.loop_range = None;
+            resync(state, audio);
+        }
+    }
+}
+
+/// The inside of the chord popover: each chord in the bar with its
+/// degree-labelled tones and its suggested scale as playable chips — spelled by
+/// letter arithmetic, the same as the transport readout — plus the woodshed
+/// loop for the four-bar system the bar sits in.
+fn chord_popup_ui(
+    ui: &mut egui::Ui,
+    bar: &Bar,
+    bi: usize,
+    total_bars: usize,
+    loop_range: Option<(usize, usize)>,
+    chip_run: &mut Option<ChipRun>,
+    audio: &Audio,
+) -> Option<ChartAction> {
+    let gold = egui::Color32::from_rgb(224, 166, 60);
+    let mut action = None;
+    let slots = std::iter::once(bar.first).chain(bar.second);
+    for (which, slot) in slots.enumerate() {
+        if which > 0 {
+            ui.separator();
+        }
+        if bar.is_split() {
+            ui.label(
+                egui::RichText::new(if which == 0 {
+                    "beats 1\u{2013}2"
+                } else {
+                    "beats 3\u{2013}4"
+                })
+                .weak()
+                .size(12.0),
+            );
+        }
+        let use_sharp = slot.use_sharp();
+        let root_note = jazz_theory::note::Note::parse(pc_name(slot.root, use_sharp));
+        let root_midi = jazz_theory::note::midi_for(slot.root, 4);
+        let tone_row = egui::Id::new(("popup_tones", bi, which));
+        let n_tones = slot.quality.ints().len();
+        ui.horizontal_wrapped(|ui| {
+            for (k, (&i, d)) in slot
+                .quality
+                .ints()
+                .iter()
+                .zip(slot.quality.degs())
+                .enumerate()
+            {
+                let name = jazz_theory::note::note_name(slot.root + i, d, root_note, use_sharp);
+                let lit = chip_lit(chip_run, audio, tone_row, n_tones, k);
+                if note_chip(ui, &name, d, lit).clicked() {
+                    audio
+                        .0
+                        .note(Instrument::Vibes, root_midi + i, 0.20, 0.45, 0.0);
+                    *chip_run = Some(ChipRun {
+                        row: tone_row,
+                        started: audio.0.time(),
+                        step: 0.45,
+                        count: n_tones,
+                        glow: ChipGlow::Single(k),
+                    });
+                }
+            }
+        });
+        if ui.button("\u{25B6} Hear the chord").clicked() {
+            let midis: Vec<i32> = slot.quality.ints().iter().map(|&i| root_midi + i).collect();
+            audio.0.chord(Instrument::Keys, midis, 0.07, 1.6, 0.0);
+            // Every tone chip rings gold for as long as the chord does.
+            *chip_run = Some(ChipRun {
+                row: tone_row,
+                started: audio.0.time(),
+                step: 1.6,
+                count: n_tones,
+                glow: ChipGlow::Chord(n_tones),
+            });
+        }
+        if let Some(scale) = find_scale(slot.scale_name()) {
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new(format!("Suggested scale: {}", scale.name)).color(gold));
+            let notes = render_scale(scale, slot.root, use_sharp);
+            // Every chip shown is a note played, resolving octave included, and
+            // the sounding one lights up as a run goes by.
+            let row = egui::Id::new(("popup_scale", bi, which));
+            let n_chips = notes.len() + 1;
+            ui.horizontal_wrapped(|ui| {
+                for (k, n) in notes.iter().enumerate() {
+                    let lit = chip_lit(chip_run, audio, row, n_chips, k);
+                    if note_chip(ui, &n.name, &n.degree, lit).clicked() {
+                        audio
+                            .0
+                            .note(Instrument::Vibes, root_midi + n.semitones, 0.20, 0.50, 0.0);
+                        *chip_run = Some(ChipRun {
+                            row,
+                            started: audio.0.time(),
+                            step: 0.50,
+                            count: n_chips,
+                            glow: ChipGlow::Single(k),
+                        });
+                    }
+                }
+                let lit = chip_lit(chip_run, audio, row, n_chips, notes.len());
+                if note_chip(ui, &notes[0].name, "1", lit).clicked() {
+                    audio
+                        .0
+                        .note(Instrument::Vibes, root_midi + 12, 0.20, 0.50, 0.0);
+                    *chip_run = Some(ChipRun {
+                        row,
+                        started: audio.0.time(),
+                        step: 0.50,
+                        count: n_chips,
+                        glow: ChipGlow::Single(notes.len()),
+                    });
+                }
+            });
+            ui.horizontal(|ui| {
+                if ui.button("\u{25B6} Play the scale").clicked() {
+                    for (k, n) in notes.iter().enumerate() {
+                        audio.0.note(
+                            Instrument::Vibes,
+                            root_midi + n.semitones,
+                            0.20,
+                            0.30,
+                            k as f32 * 0.34,
+                        );
+                    }
+                    audio.0.note(
+                        Instrument::Vibes,
+                        root_midi + 12,
+                        0.20,
+                        0.40,
+                        notes.len() as f32 * 0.34,
+                    );
+                    *chip_run = Some(ChipRun {
+                        row,
+                        started: audio.0.time(),
+                        step: 0.34,
+                        count: n_chips,
+                        glow: ChipGlow::Run,
+                    });
+                }
+                if ui.button("Open in Theory").clicked() {
+                    if let Some(idx) = SCALES.iter().position(|s| s.name == scale.name) {
+                        action = Some(ChartAction::OpenTheory {
+                            scale_index: idx,
+                            root: slot.root,
+                        });
+                    }
+                }
+            });
+        }
+    }
+    ui.separator();
+    let in_loop = loop_range.is_some_and(|(s, l)| (s..s + l).contains(&bi));
+    if in_loop {
+        if ui.button("Release the loop").clicked() {
+            action = Some(ChartAction::LoopOff);
+        }
+    } else {
+        let start = (bi / 4) * 4;
+        let len = (total_bars - start).min(4);
+        if ui
+            .button(format!("Loop bars {}\u{2013}{}", start + 1, start + len))
+            .on_hover_text("Cycle this system until it sits under your fingers")
+            .clicked()
+        {
+            action = Some(ChartAction::LoopSystem(bi));
+        }
+    }
+    action
 }
 
 /// Load a progression's changes and (re)start the transport from its top.
 /// The tune's meter comes with its bars — a waltz arrives in three.
 fn load_progression(state: &mut AppState, audio: &Audio, index: usize, play: bool) {
-    state.bars = state.progs[index].bars.clone();
+    let bars = state.progs[index].bars.clone();
+    // A different tune invalidates the open popover and the woodshed loop; a
+    // plain restart of the same form keeps both.
+    if bars != state.bars {
+        state.chart_popup = None;
+        state.loop_range = None;
+    }
+    state.bars = bars;
     state.settings.meter = state.progs[index].meter;
     restart_transport(state, audio, play);
 }
@@ -1135,14 +1482,39 @@ fn theory_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
         use_sharp_for_root(state.scale_root),
     );
     let root_midi = jazz_theory::note::midi_for(state.scale_root, 4);
+    // Every chip shown is a note played, resolving octave included; the
+    // sounding chip lights during "Play ascending".
+    let row = egui::Id::new("theory_scale");
+    let n_chips = notes.len() + 1;
     ui.horizontal_wrapped(|ui| {
-        for n in &notes {
+        for (k, n) in notes.iter().enumerate() {
             // clicking a note sounds it, the same as the browser version
-            if note_chip(ui, &n.name, &n.degree).clicked() {
+            let lit = chip_lit(&state.chip_run, audio, row, n_chips, k);
+            if note_chip(ui, &n.name, &n.degree, lit).clicked() {
                 audio
                     .0
                     .note(Instrument::Vibes, root_midi + n.semitones, 0.20, 0.50, 0.0);
+                state.chip_run = Some(ChipRun {
+                    row,
+                    started: audio.0.time(),
+                    step: 0.50,
+                    count: n_chips,
+                    glow: ChipGlow::Single(k),
+                });
             }
+        }
+        let lit = chip_lit(&state.chip_run, audio, row, n_chips, notes.len());
+        if note_chip(ui, &notes[0].name, "1", lit).clicked() {
+            audio
+                .0
+                .note(Instrument::Vibes, root_midi + 12, 0.20, 0.50, 0.0);
+            state.chip_run = Some(ChipRun {
+                row,
+                started: audio.0.time(),
+                step: 0.50,
+                count: n_chips,
+                glow: ChipGlow::Single(notes.len()),
+            });
         }
     });
 
@@ -1166,16 +1538,30 @@ fn theory_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
                 0.40,
                 notes.len() as f32 * 0.34,
             );
+            state.chip_run = Some(ChipRun {
+                row,
+                started: audio.0.time(),
+                step: 0.34,
+                count: n_chips,
+                glow: ChipGlow::Run,
+            });
         }
         if ui.button("\u{25B6} Play as a chord").clicked() {
             let midis: Vec<i32> = notes.iter().map(|n| root_midi + n.semitones).collect();
             audio.0.chord(Instrument::Keys, midis, 0.07, 1.6, 0.0);
+            // The scale tones ring together; the octave chip is not in the
+            // cluster, so it stays dark.
+            state.chip_run = Some(ChipRun {
+                row,
+                started: audio.0.time(),
+                step: 1.6,
+                count: n_chips,
+                glow: ChipGlow::Chord(notes.len()),
+            });
         }
     });
     ui.add_space(8.0);
     ui.label(scale.tip);
-    // silence the unused-import warning when the crate is built without the lookup
-    let _ = find_scale(scale.name);
 }
 
 fn drills_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
@@ -1213,12 +1599,19 @@ fn drills_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
             }
         });
         ui.add_space(6.0);
+        let row = egui::Id::new("drill_line");
         ui.horizontal_wrapped(|ui| {
-            let root = jazz_theory::note::midi_for(state.drill_key, 4);
-            let _ = root;
-            for n in &d.notes {
-                if note_chip(ui, &n.name, &n.degree).clicked() {
+            for (k, n) in d.notes.iter().enumerate() {
+                let lit = chip_lit(&state.chip_run, audio, row, d.notes.len(), k);
+                if note_chip(ui, &n.name, &n.degree, lit).clicked() {
                     audio.0.note(Instrument::Vibes, n.midi, 0.20, 0.45, 0.0);
+                    state.chip_run = Some(ChipRun {
+                        row,
+                        started: audio.0.time(),
+                        step: 0.45,
+                        count: d.notes.len(),
+                        glow: ChipGlow::Single(k),
+                    });
                 }
             }
         });
@@ -1229,6 +1622,13 @@ fn drills_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
                     .0
                     .note(Instrument::Vibes, n.midi, 0.20, 0.30, i as f32 * 0.33);
             }
+            state.chip_run = Some(ChipRun {
+                row,
+                started: audio.0.time(),
+                step: 0.33,
+                count: d.notes.len(),
+                glow: ChipGlow::Run,
+            });
         }
         ui.add_space(6.0);
         ui.label(egui::RichText::new(&d.how).italics());
