@@ -14,7 +14,7 @@ use jazz_audio::engine::{self, plan_bar, BassStyle, CompStyle, Density, HornStyl
 use jazz_audio::reverb::Reverb;
 use jazz_audio::stream::{AudioCore, AudioHandle};
 use jazz_audio::voice::Instrument;
-use jazz_theory::curriculum::{TryIt, LESSONS};
+use jazz_theory::curriculum::{Lesson, TryIt, LESSONS};
 use jazz_theory::drill::{self, DRILL_IDS};
 use jazz_theory::ear::{self, Mode as EarMode, Question};
 use jazz_theory::harmony::{find_scale, render_scale, SCALES};
@@ -38,6 +38,8 @@ struct AppState {
     tab: Tab,
     /// Which curriculum level the Learn tab is showing.
     learn_level: Level,
+    /// Today's practice session and its step progress (persisted).
+    practice: PracticeState,
     volume: f32,
     ear_mode: EarMode,
     ear: EarState,
@@ -89,6 +91,7 @@ struct AppState {
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 enum Tab {
+    Practice,
     Learn,
     Theory,
     Drills,
@@ -96,6 +99,58 @@ enum Tab {
     Masters,
     Standards,
     Settings,
+}
+
+/// Where the student is in the practice-room routine: how many sessions they
+/// have finished, and which of today's four steps are done. Persisted between
+/// runs, so tomorrow's session picks up where today's left off.
+struct PracticeState {
+    session: u32,
+    done: [bool; 4],
+}
+
+/// Where practice progress lives between runs: a two-line text file in the
+/// user's config area. Two integers and four flags do not need a format crate.
+fn practice_file() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("APPDATA").or_else(|| std::env::var_os("HOME"))?;
+    Some(
+        std::path::PathBuf::from(base)
+            .join("JazzImprovLab")
+            .join("practice.txt"),
+    )
+}
+
+fn load_practice() -> PracticeState {
+    let mut p = PracticeState {
+        session: 0,
+        done: [false; 4],
+    };
+    let Some(path) = practice_file() else {
+        return p;
+    };
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return p;
+    };
+    for line in text.lines() {
+        if let Some(v) = line.strip_prefix("session=") {
+            p.session = v.trim().parse().unwrap_or(0);
+        } else if let Some(v) = line.strip_prefix("done=") {
+            for (i, c) in v.trim().chars().take(4).enumerate() {
+                p.done[i] = c == '1';
+            }
+        }
+    }
+    p
+}
+
+/// Best-effort: losing practice progress must never take the app down.
+fn save_practice(p: &PracticeState) {
+    let Some(path) = practice_file() else { return };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let done: String = p.done.iter().map(|d| if *d { '1' } else { '0' }).collect();
+    let _ = std::fs::write(path, format!("session={}\ndone={done}\n", p.session));
 }
 
 #[derive(Default)]
@@ -143,8 +198,9 @@ fn main() {
             drill_key: 0,
             scale_index: 0,
             scale_root: 0,
-            tab: Tab::Learn,
+            tab: Tab::Practice,
             learn_level: Level::Beginner,
+            practice: load_practice(),
             volume: 1.0,
             ear_mode: EarMode::Intervals,
             ear: EarState::default(),
@@ -374,6 +430,7 @@ fn ui(mut contexts: EguiContexts, mut state: ResMut<AppState>, audio: Res<Audio>
         ui.horizontal(|ui| {
             ui.heading("The Jazz Improvisation Lab");
             ui.separator();
+            ui.selectable_value(&mut state.tab, Tab::Practice, "Practice");
             ui.selectable_value(&mut state.tab, Tab::Learn, "Learn");
             ui.selectable_value(&mut state.tab, Tab::Theory, "Theory");
             ui.selectable_value(&mut state.tab, Tab::Drills, "Drills");
@@ -394,6 +451,7 @@ fn ui(mut contexts: EguiContexts, mut state: ResMut<AppState>, audio: Res<Audio>
         .show(&mut root, |ui| stage_ui(ui, &mut state, &audio));
 
     egui::CentralPanel::default().show(&mut root, |ui| match state.tab {
+        Tab::Practice => practice_ui(ui, &mut state, &audio),
         Tab::Learn => learn_ui(ui, &mut state, &audio),
         Tab::Theory => theory_ui(ui, &mut state, &audio),
         Tab::Drills => drills_ui(ui, &mut state, &audio),
@@ -1364,6 +1422,180 @@ fn restart_transport(state: &mut AppState, audio: &Audio, play: bool) {
     audio.0.set_playing(play);
 }
 
+/// The Practice tab: today's session, assembled deterministically from the
+/// session number so a re-open shows the same plan. Warm-up drills walk the
+/// drill list with their keys walking the cycle of fourths; the lesson is the
+/// next one in teaching order (wrapping around for review); the jam prefers
+/// the lesson's own form and otherwise rotates the catalogue; the ear check
+/// rotates its mode. Steps are marked done by hand — the student is the only
+/// honest judge of a practice step — and finishing all four advances the
+/// session counter, persisted via [`save_practice`].
+fn practice_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
+    let gold = egui::Color32::from_rgb(224, 166, 60);
+    let s = state.practice.session as usize;
+    let drill_id = DRILL_IDS[s % DRILL_IDS.len()];
+    let drill_key = ((s * 5) % 12) as i32; // around the cycle of fourths
+    let lesson = &LESSONS[s % LESSONS.len()];
+    let form_i = match lesson.try_it {
+        Some(TryIt::Progression(id)) => state
+            .progs
+            .iter()
+            .position(|p| p.id == id)
+            .unwrap_or(s % state.progs.len()),
+        _ => s % state.progs.len(),
+    };
+    let ear_mode = EarMode::ALL[s % EarMode::ALL.len()];
+
+    ui.horizontal(|ui| {
+        ui.heading(format!("Practice session {}", s + 1));
+        let done = state.practice.done.iter().filter(|d| **d).count();
+        ui.label(egui::RichText::new(format!("\u{00B7} {done} of 4 steps done")).weak());
+    });
+    ui.label(
+        egui::RichText::new(
+            "Twenty focused minutes: warm up, learn one idea, take it to the band, \
+             then train the ear. Mark each step done as you go \u{2014} you are the \
+             only honest judge.",
+        )
+        .weak()
+        .size(12.0),
+    );
+    ui.separator();
+
+    let mut act: Option<TryIt> = None;
+    let mut save = false;
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        // ---- step 1: warm up ----
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                save |= ui.checkbox(&mut state.practice.done[0], "").changed();
+                ui.label(
+                    egui::RichText::new("1 \u{00B7} Warm up")
+                        .strong()
+                        .color(gold),
+                );
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{drill_id} in {}",
+                        pc_name(drill_key, use_sharp_for_root(drill_key))
+                    ))
+                    .weak(),
+                );
+            });
+            ui.label(
+                egui::RichText::new(
+                    "Sing it before you play it; the key moves up a fourth each session.",
+                )
+                .size(13.0),
+            );
+            if ui.button("\u{25B6} Open the drill").clicked() {
+                if let Some(i) = DRILL_IDS.iter().position(|d| *d == drill_id) {
+                    state.drill_index = i;
+                }
+                state.drill_key = drill_key;
+                state.tab = Tab::Drills;
+            }
+        });
+        ui.add_space(6.0);
+
+        // ---- step 2: one idea ----
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                save |= ui.checkbox(&mut state.practice.done[1], "").changed();
+                ui.label(
+                    egui::RichText::new("2 \u{00B7} One idea")
+                        .strong()
+                        .color(gold),
+                );
+                ui.label(egui::RichText::new(lesson.title).weak());
+            });
+            egui::CollapsingHeader::new("Read the lesson")
+                .default_open(true)
+                .show(ui, |ui| {
+                    if let Some(t) = lesson_body_ui(ui, lesson, &state.progs) {
+                        act = Some(t);
+                    }
+                });
+        });
+        ui.add_space(6.0);
+
+        // ---- step 3: take it to the band ----
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                save |= ui.checkbox(&mut state.practice.done[2], "").changed();
+                ui.label(
+                    egui::RichText::new("3 \u{00B7} Take it to the band")
+                        .strong()
+                        .color(gold),
+                );
+                ui.label(egui::RichText::new(state.progs[form_i].name).weak());
+            });
+            ui.label(
+                egui::RichText::new(
+                    "Solo along on the stage below. Click a chord for its tones and \
+                     scale; loop any four bars until they sit under your fingers.",
+                )
+                .size(13.0),
+            );
+            if ui.button("\u{25B6} Play the form").clicked() {
+                state.prog_index = form_i;
+                load_progression(state, audio, form_i, true);
+            }
+        });
+        ui.add_space(6.0);
+
+        // ---- step 4: train the ear ----
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                save |= ui.checkbox(&mut state.practice.done[3], "").changed();
+                ui.label(
+                    egui::RichText::new("4 \u{00B7} Train the ear")
+                        .strong()
+                        .color(gold),
+                );
+                ui.label(egui::RichText::new(ear_mode.label()).weak());
+            });
+            ui.label(
+                egui::RichText::new("Five questions. Sing the sound back before you answer.")
+                    .size(13.0),
+            );
+            if ui.button("\u{25B6} Open ear training").clicked() {
+                if state.ear_mode != ear_mode {
+                    state.ear_mode = ear_mode;
+                    state.ear.current = None;
+                    state.ear.picked = None;
+                }
+                state.tab = Tab::Ear;
+            }
+        });
+
+        if state.practice.done.iter().all(|d| *d) {
+            ui.add_space(10.0);
+            if ui
+                .button(
+                    egui::RichText::new(format!(
+                        "\u{2713} Finish session {} \u{2014} set up the next",
+                        s + 1
+                    ))
+                    .color(gold),
+                )
+                .clicked()
+            {
+                state.practice.session += 1;
+                state.practice.done = [false; 4];
+                save = true;
+            }
+        }
+    });
+
+    if save {
+        save_practice(&state.practice);
+    }
+    if let Some(t) = act {
+        apply_try_it(state, audio, t);
+    }
+}
+
 /// The Learn tab: the written curriculum as cards, in teaching order, filtered
 /// by level. Each lesson's `try_it` loads the thing it names — a progression
 /// starts on the stage below without leaving the lesson; a drill or scale
@@ -1395,27 +1627,8 @@ fn learn_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
                         .color(gold),
                 );
                 ui.add_space(2.0);
-                for para in lesson.body.split("\n\n") {
-                    ui.add(egui::Label::new(egui::RichText::new(para).size(14.0)).wrap());
-                    ui.add_space(4.0);
-                }
-                if let Some(t) = lesson.try_it {
-                    let label = match t {
-                        TryIt::Drill(id) => format!("\u{25B6} Try it: {id}"),
-                        TryIt::Progression(id) => {
-                            let name = state
-                                .progs
-                                .iter()
-                                .find(|p| p.id == id)
-                                .map(|p| p.name)
-                                .unwrap_or(id);
-                            format!("\u{25B6} Hear it: {name}")
-                        }
-                        TryIt::Scale(name) => format!("\u{25B6} See it: {name}"),
-                    };
-                    if ui.button(label).clicked() {
-                        act = Some(t);
-                    }
+                if let Some(t) = lesson_body_ui(ui, lesson, &state.progs) {
+                    act = Some(t);
                 }
             });
             ui.add_space(6.0);
@@ -1423,26 +1636,59 @@ fn learn_ui(ui: &mut egui::Ui, state: &mut AppState, audio: &Audio) {
     });
 
     if let Some(t) = act {
-        match t {
-            // The stage is docked below, so hearing a form never leaves the
-            // lesson that is teaching it.
+        apply_try_it(state, audio, t);
+    }
+}
+
+/// A lesson's teaching text and its try-it button. Returns the `TryIt` if the
+/// button was clicked this frame; the caller applies it once its borrows end.
+fn lesson_body_ui(ui: &mut egui::Ui, lesson: &Lesson, progs: &[Progression]) -> Option<TryIt> {
+    let mut act = None;
+    for para in lesson.body.split("\n\n") {
+        ui.add(egui::Label::new(egui::RichText::new(para).size(14.0)).wrap());
+        ui.add_space(4.0);
+    }
+    if let Some(t) = lesson.try_it {
+        let label = match t {
+            TryIt::Drill(id) => format!("\u{25B6} Try it: {id}"),
             TryIt::Progression(id) => {
-                if let Some(i) = state.progs.iter().position(|p| p.id == id) {
-                    state.prog_index = i;
-                    load_progression(state, audio, i, true);
-                }
+                let name = progs
+                    .iter()
+                    .find(|p| p.id == id)
+                    .map(|p| p.name)
+                    .unwrap_or(id);
+                format!("\u{25B6} Hear it: {name}")
             }
-            TryIt::Drill(id) => {
-                if let Some(i) = DRILL_IDS.iter().position(|d| *d == id) {
-                    state.drill_index = i;
-                    state.tab = Tab::Drills;
-                }
+            TryIt::Scale(name) => format!("\u{25B6} See it: {name}"),
+        };
+        if ui.button(label).clicked() {
+            act = Some(t);
+        }
+    }
+    act
+}
+
+/// Resolve a lesson's cross-reference: a progression plays on the stage below
+/// without leaving the current tab; a drill or scale opens its teacher tab
+/// with the material already selected.
+fn apply_try_it(state: &mut AppState, audio: &Audio, t: TryIt) {
+    match t {
+        TryIt::Progression(id) => {
+            if let Some(i) = state.progs.iter().position(|p| p.id == id) {
+                state.prog_index = i;
+                load_progression(state, audio, i, true);
             }
-            TryIt::Scale(name) => {
-                if let Some(i) = SCALES.iter().position(|s| s.name == name) {
-                    state.scale_index = i;
-                    state.tab = Tab::Theory;
-                }
+        }
+        TryIt::Drill(id) => {
+            if let Some(i) = DRILL_IDS.iter().position(|d| *d == id) {
+                state.drill_index = i;
+                state.tab = Tab::Drills;
+            }
+        }
+        TryIt::Scale(name) => {
+            if let Some(i) = SCALES.iter().position(|s| s.name == name) {
+                state.scale_index = i;
+                state.tab = Tab::Theory;
             }
         }
     }
