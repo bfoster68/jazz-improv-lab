@@ -271,18 +271,34 @@ to that tab with the material pre-selected (deferred-load pattern from
 `standards_ui`). The standards' "Comp me" / "Full band" likewise no longer
 switch tabs — the tune list stays put and the band starts below.
 
+### Shipping
+
+Both shippable builds carry the full FluidR3 and are produced by scripts in
+`itch/` (outputs gitignored, rebuilt on demand):
+
+- `build-desktop.ps1` zips the exe with `soundfont.sf2` beside it — where
+  `find_soundfont` looks first. Unzip anywhere, zero setup.
+- `build-wasm.ps1` / `.sh` build the Bevy app for the browser. The boot
+  overlay in `itch/bevy-shell/index.html` downloads `soundfont.sf2` with a
+  byte-accurate progress bar before enabling Start, leaves the bytes on the
+  `JAZZ_SF2` global, and the app takes them (`SoundfontVoices::from_bytes`,
+  freeing the JS copy) when the first gesture opens the audio stream. Either
+  path failing means the built-in synth, never a dead app. The script
+  installs the exact `wasm-bindgen-cli` that Cargo.lock pins, and the cargo
+  artifact keeps the binary's hyphen: `jazz-app.wasm`, not `jazz_app.wasm`.
+
+The wasm build compiles clean and has been played in a browser end to end
+(FluidR3 engine label, transport advancing, empty console). `wasm-opt` is
+optional but roughly halves the ~52 MB wasm payload — install Binaryen
+before an itch upload.
+
 ### Open questions worth checking with the user
 
 - Does the audio dropout fix actually sound right on real hardware? It is verified
   by test, but nobody has heard it yet.
-- The wasm build has never been compiled. `itch/build-wasm.ps1` is written but
-  unproven; expect a `wasm-bindgen-cli` version mismatch to be the first hurdle.
 
 ## Known gaps
 
-- Both builds can use real samples: the web app streams FluidR3 from a CDN, the
-  Rust app loads any GM `.sf2` from `crates/jazz-app/assets/soundfont.sf2` via
-  `rustysynth` (feature `soundfont`). Neither bundles one.
 - Bevy is built with `default-features = false`. Adding a feature back is fine, but
   check the crate count and wasm size first — the defaults pull in glTF, gamepads,
   Bevy's own audio stack and every image codec, none of which this app uses.
