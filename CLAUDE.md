@@ -254,6 +254,15 @@ Chips glow while their notes sound (`ChipRun`/`ChipGlow`: a travelling run, a
 chord ringing its tones together, or one clicked chip), in the popover, the
 Theory tab and the drill line alike.
 
+The Practice tab (`practice_ui`, the landing tab) is the practice room:
+today's four-step session — warm-up drill (keys walk the cycle of fourths),
+the next lesson in teaching order read inline, a jam on the lesson's own form
+(else the catalogue rotates), and a rotating-mode ear check. The plan is
+deterministic from the session number; steps are ticked off by hand and
+finishing all four advances the counter. Progress persists as two lines in
+`%APPDATA%\JazzImprovLab\practice.txt` (`load_practice`/`save_practice`,
+best-effort on purpose). The other tabs remain the free-browse library.
+
 The Learn tab renders `jazz_theory::curriculum::LESSONS` as cards with a
 Beginner/Intermediate/Advanced filter (defaults Beginner; it is the landing
 tab). Its `try_it` buttons resolve per type: `Progression(id)` loads and plays
