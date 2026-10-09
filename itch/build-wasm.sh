@@ -21,7 +21,7 @@ echo "==> running wasm-bindgen"
 rm -rf "$dist"; mkdir -p "$dist"
 wasm-bindgen --no-typescript --target web \
   --out-dir "$dist" --out-name jazz-app \
-  "$root/rust/target/wasm32-unknown-unknown/release/jazz_app.wasm"
+  "$root/rust/target/wasm32-unknown-unknown/release/jazz-app.wasm"
 
 if command -v wasm-opt >/dev/null 2>&1; then
   echo "==> optimising with wasm-opt"

@@ -19,6 +19,7 @@
   .bar{width:min(420px,80vw);height:6px;border-radius:99px;background:#232b36;overflow:hidden}
   .bar i{display:block;height:100%;width:35%;background:#4bb3a7;
     animation:slide 1.1s ease-in-out infinite}
+  .bar.known i{animation:none;width:0;transition:width .2s ease}
   @keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(385%)}}
 </style>
 </head>
@@ -40,11 +41,51 @@
   const boot   = document.getElementById('boot');
   const msg    = document.getElementById('boot-msg');
   const bar    = document.getElementById('boot-bar');
+  const fill   = bar.querySelector('i');
   const start  = document.getElementById('boot-start');
 
-  init()
-    .then(() => {
-      msg.textContent = 'Ready.';
+  // The band's real instruments: fetched before the app starts so the first
+  // note is already FluidR3, with a byte-accurate bar when the server sends a
+  // length. If the download fails the app still runs on its built-in synth.
+  async function fetchSoundfont() {
+    try {
+      const res = await fetch('soundfont.sf2');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const total = Number(res.headers.get('Content-Length')) || 0;
+      if (total && res.body) {
+        bar.classList.add('known');
+        const chunks = [];
+        let got = 0;
+        const reader = res.body.getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          got += value.length;
+          fill.style.width = Math.min(100, got / total * 100) + '%';
+          msg.textContent = 'Downloading the band’s instruments… '
+            + (got / 1048576).toFixed(0) + ' / ' + (total / 1048576).toFixed(0) + ' MB';
+        }
+        const bytes = new Uint8Array(got);
+        let at = 0;
+        for (const c of chunks) { bytes.set(c, at); at += c.length; }
+        globalThis.JAZZ_SF2 = bytes;
+      } else {
+        msg.textContent = 'Downloading the band’s instruments…';
+        globalThis.JAZZ_SF2 = new Uint8Array(await res.arrayBuffer());
+      }
+      return true;
+    } catch (err) {
+      console.warn('soundfont download failed; using the built-in synth', err);
+      return false;
+    }
+  }
+
+  Promise.all([init(), fetchSoundfont()])
+    .then(([, gotSf2]) => {
+      msg.textContent = gotSf2
+        ? 'Ready.'
+        : 'Ready (instrument download failed — using the built-in synth).';
       bar.style.display = 'none';
       start.disabled = false;
       start.focus();
@@ -56,7 +97,8 @@
     });
 
   // The click that dismisses this overlay is also the gesture that unlocks audio —
-  // the Bevy app opens its output stream on the first input it sees.
+  // the Bevy app opens its output stream on the first input it sees, and takes
+  // the soundfont bytes off JAZZ_SF2 at the same moment.
   start.addEventListener('click', () => {
     boot.remove();
     document.getElementById('jazz-canvas').focus();

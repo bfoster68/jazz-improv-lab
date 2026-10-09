@@ -19,13 +19,27 @@ Push-Location (Join-Path $root 'rust')
 cargo build --release --target wasm32-unknown-unknown -p jazz-app
 Pop-Location
 
+# wasm-bindgen-cli must match the wasm-bindgen crate in Cargo.lock exactly, or
+# it refuses the module. Read the locked version and (re)install on mismatch.
+$lockHit = Select-String -Path (Join-Path $root 'rust\Cargo.lock') `
+  -Pattern '^name = "wasm-bindgen"$' -Context 0,1
+$wanted = ($lockHit.Context.PostContext[0] -replace 'version = "([^"]+)"', '$1').Trim()
+$have = ''
+if (Get-Command wasm-bindgen -ErrorAction SilentlyContinue) {
+  $have = ((wasm-bindgen --version) -split ' ')[1]
+}
+if ($have -ne $wanted) {
+  Write-Host "==> installing wasm-bindgen-cli $wanted (found: '$have')" -ForegroundColor Cyan
+  cargo install wasm-bindgen-cli --version $wanted --force
+}
+
 Write-Host '==> running wasm-bindgen' -ForegroundColor Cyan
 Remove-Item -Recurse -Force $dist -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
 wasm-bindgen --no-typescript --target web `
   --out-dir $dist `
   --out-name jazz-app `
-  (Join-Path $root 'rust\target\wasm32-unknown-unknown\release\jazz_app.wasm')
+  (Join-Path $root 'rust\target\wasm32-unknown-unknown\release\jazz-app.wasm')
 
 if (Get-Command wasm-opt -ErrorAction SilentlyContinue) {
   Write-Host '==> optimising with wasm-opt' -ForegroundColor Cyan
@@ -35,6 +49,15 @@ if (Get-Command wasm-opt -ErrorAction SilentlyContinue) {
 }
 
 Copy-Item (Join-Path $PSScriptRoot 'bevy-shell\index.html') $dist
+
+# The band's instruments ride along: the page downloads soundfont.sf2 before
+# the app starts (see the boot script in index.html).
+$sf2 = Join-Path $root 'rust\crates\jazz-app\assets\soundfont.sf2'
+if (-not (Test-Path $sf2)) {
+  Write-Host '==> fetching the SoundFont (first time only)' -ForegroundColor Cyan
+  & (Join-Path $root 'rust\crates\jazz-app\assets\fetch-soundfont.ps1')
+}
+Copy-Item $sf2 $dist
 
 $zip = Join-Path $PSScriptRoot 'jazz-lab-bevy-itch.zip'
 Remove-Item $zip -ErrorAction SilentlyContinue

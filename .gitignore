@@ -5,3 +5,9 @@ node_modules/
 pg-*.jpg
 # SoundFonts are large binaries fetched locally, never committed.
 *.sf2
+
+# Shipping artifacts; rebuilt any time by itch/build-wasm.ps1 and build-desktop.ps1.
+itch/dist/
+itch/dist-desktop/
+itch/jazz-lab-bevy-itch.zip
+itch/jazz-lab-windows.zip

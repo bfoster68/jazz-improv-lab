@@ -116,6 +116,15 @@ impl SoundfontVoices {
         Self::from_soundfont(Arc::new(sf), sample_rate)
     }
 
+    /// Parse a soundfont already sitting in memory — the web build fetches the
+    /// file before the app starts and hands the bytes over, since there is no
+    /// filesystem to find it on.
+    pub fn from_bytes(bytes: &[u8], sample_rate: f32) -> Result<Self, String> {
+        let mut cur = std::io::Cursor::new(bytes);
+        let sf = SoundFont::new(&mut cur).map_err(|e| format!("not a usable soundfont: {e}"))?;
+        Self::from_soundfont(Arc::new(sf), sample_rate)
+    }
+
     /// Build from an already-parsed SoundFont — used on the web, where the file
     /// arrives as bytes rather than a path.
     pub fn from_soundfont(sf: Arc<SoundFont>, sample_rate: f32) -> Result<Self, String> {
@@ -199,7 +208,11 @@ impl SoundfontVoices {
             if self.notes[i].at <= end {
                 let n = self.notes.swap_remove(i);
                 self.synth.note_on(n.channel, n.key, n.velocity);
-                self.offs.push(PendingOff { at: n.at + n.dur, channel: n.channel, key: n.key });
+                self.offs.push(PendingOff {
+                    at: n.at + n.dur,
+                    channel: n.channel,
+                    key: n.key,
+                });
             } else {
                 i += 1;
             }
@@ -246,10 +259,19 @@ mod tests {
         let comp = velocity_for(0.055);
         let bass = velocity_for(0.17);
         assert!(comp >= 55, "comping still whispers at velocity {comp}");
-        assert!((95..=127).contains(&bass), "bass velocity {bass} out of range");
-        assert!(velocity_for(0.01) >= 24, "floor must keep ghost notes audible");
+        assert!(
+            (95..=127).contains(&bass),
+            "bass velocity {bass} out of range"
+        );
+        assert!(
+            velocity_for(0.01) >= 24,
+            "floor must keep ghost notes audible"
+        );
         assert!(velocity_for(0.5) <= 127);
-        assert!(velocity_for(0.1) > velocity_for(0.05), "mapping must stay monotonic");
+        assert!(
+            velocity_for(0.1) > velocity_for(0.05),
+            "mapping must stay monotonic"
+        );
         // A lead voice (the idea generator, ~0.15) must reach the bright sample
         // layers, not the breathy subtone ones.
         assert!(velocity_for(0.15) >= 90, "the lead still whispers");
@@ -259,6 +281,12 @@ mod tests {
     fn a_missing_file_reports_an_error_instead_of_panicking() {
         let r = SoundfontVoices::load("/definitely/not/here.sf2", 44_100.0);
         assert!(r.is_err(), "a missing soundfont must not panic");
+    }
+
+    #[test]
+    fn garbage_bytes_are_rejected_instead_of_loaded() {
+        let r = SoundfontVoices::from_bytes(b"this is plainly not a soundfont", 44_100.0);
+        assert!(r.is_err(), "garbage bytes must be rejected, not loaded");
     }
 
     #[test]

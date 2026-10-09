@@ -2947,6 +2947,7 @@ dependencies = [
  "cpal",
  "jazz-audio",
  "jazz-theory",
+ "js-sys",
  "wasm-bindgen",
 ]
 

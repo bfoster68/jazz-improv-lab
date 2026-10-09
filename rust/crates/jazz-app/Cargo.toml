@@ -31,3 +31,6 @@ cpal = "0.16"
 cpal = { version = "0.16", features = ["wasm-bindgen"] }
 console_error_panic_hook = "0.1"
 wasm-bindgen = "0.2"
+# The page fetches the SoundFont before the app starts and leaves the bytes on
+# a JS global; js-sys is how the app reaches over and takes them.
+js-sys = "0.3"

@@ -357,8 +357,60 @@ fn start_audio_on_first_interaction(
     let _ = &audio;
 }
 
+/// Load the SoundFont into the mixer and name the engine that results.
+///
+/// On desktop the file sits on disk — next to the executable in a shipped
+/// build, in the dev tree otherwise. On the web the page fetched it before the
+/// app started and left the bytes on the `JAZZ_SF2` global; they are taken
+/// (and the JS copy freed) here. Either way, failure means the built-in synth,
+/// never a dead app.
+#[cfg(not(target_arch = "wasm32"))]
+fn load_soundfont_into(core: &mut AudioCore, rate: f32) -> String {
+    match find_soundfont() {
+        Some(path) => match jazz_audio::soundfont::SoundfontVoices::load(&path, rate) {
+            Ok(sf) => {
+                println!("[audio] using soundfont {}", path.display());
+                core.set_soundfont(Some(sf));
+                "FluidR3 GM".to_string()
+            }
+            Err(why) => {
+                println!("[audio] built-in synth ({why})");
+                "built-in synth".to_string()
+            }
+        },
+        None => {
+            println!("[audio] built-in synth (no soundfont found)");
+            "built-in synth".to_string()
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn load_soundfont_into(core: &mut AudioCore, rate: f32) -> String {
+    use wasm_bindgen::JsValue;
+    let global = js_sys::global();
+    let key = JsValue::from_str("JAZZ_SF2");
+    let Ok(v) = js_sys::Reflect::get(&global, &key) else {
+        return "built-in synth".to_string();
+    };
+    if v.is_undefined() || v.is_null() {
+        return "built-in synth".to_string();
+    }
+    let bytes = js_sys::Uint8Array::new(&v).to_vec();
+    // Free the JS-side copy — at 141 MB it is not something to keep twice.
+    let _ = js_sys::Reflect::set(&global, &key, &JsValue::UNDEFINED);
+    match jazz_audio::soundfont::SoundfontVoices::from_bytes(&bytes, rate) {
+        Ok(sf) => {
+            core.set_soundfont(Some(sf));
+            "FluidR3 GM".to_string()
+        }
+        Err(_) => "built-in synth".to_string(),
+    }
+}
+
 /// Find the bundled SoundFont, looking next to the executable first (how a
 /// shipped build carries it) and then in the dev-tree locations.
+#[cfg(not(target_arch = "wasm32"))]
 fn find_soundfont() -> Option<std::path::PathBuf> {
     use std::path::PathBuf;
     let mut candidates: Vec<PathBuf> = Vec::new();
@@ -2198,23 +2250,7 @@ fn start_audio(mut core: AudioCore) -> Result<(cpal::Stream, String), (AudioCore
 
     // Load the SoundFont at the real device rate so its samples are not
     // transposed. Pitched instruments then play from FluidR3; drums stay synth.
-    let engine = match find_soundfont() {
-        Some(path) => match jazz_audio::soundfont::SoundfontVoices::load(&path, rate) {
-            Ok(sf) => {
-                println!("[audio] using soundfont {}", path.display());
-                core.set_soundfont(Some(sf));
-                "FluidR3 GM".to_string()
-            }
-            Err(why) => {
-                println!("[audio] built-in synth ({why})");
-                "built-in synth".to_string()
-            }
-        },
-        None => {
-            println!("[audio] built-in synth (no soundfont found)");
-            "built-in synth".to_string()
-        }
-    };
+    let engine = load_soundfont_into(&mut core, rate);
 
     let mut core = core;
     let built = device.build_output_stream(
